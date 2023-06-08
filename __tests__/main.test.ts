@@ -1,5 +1,5 @@
 // import {wait} from '../src/wait'
-// import * as process from 'process'
+import * as process from 'process'
 import * as cp from 'child_process'
 import * as path from 'path'
 import {expect, test} from '@jest/globals'
@@ -19,8 +19,12 @@ import {expect, test} from '@jest/globals'
 
 // shows how the runner will run a javascript action with env / stdout protocol
 test('test runs', () => {
+  // inputs
+  // process.env['INPUT_BRANCHES'] = 'master2' // should be false
+  process.env['INPUT_BRANCHES'] = 'master,develop,feature/resusable-workflow' // should be true
   process.env['INPUT_VERSION'] = '4.0.1'
   process.env['INPUT_VERSIONSUFFIX'] = 'rc'
+  // envs
   process.env['GITHUB_RUN_NUMBER'] = '23'
   process.env['GITHUB_REF'] = 'master'
   const np = process.execPath

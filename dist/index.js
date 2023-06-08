@@ -39,31 +39,36 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.coerceArray = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 const promises_1 = __nccwpck_require__(3292);
+function coerceArray(value) {
+    return Array.isArray(value) ? value : [value];
+}
+exports.coerceArray = coerceArray;
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         const branch = github.context.ref;
         const runNumber = github.context.runNumber;
-        const pkgJson = JSON.parse(yield (0, promises_1.readFile)('./package.json', 'utf8'));
-        const version = core.getInput('version');
+        let version = core.getInput('version');
+        if (!version) {
+            const repoPkgJson = JSON.parse(yield (0, promises_1.readFile)('./package.json', 'utf8'));
+            version = repoPkgJson.version;
+        }
+        const branchesInput = core.getInput('branches');
+        const branches = branchesInput
+            ? coerceArray(branchesInput.split(','))
+            : ['main', 'master', 'develop'];
         const versionSuffixName = core.getInput('versionSuffix') || 'dev';
         const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter') || '-';
-        core.info(`InputVersion: ${version}, PkgJson Version: ${pkgJson.version}`);
-        core.info(`Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}`);
+        core.info(`Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, Branches: ${branches}`);
         let versionSuffix;
-        // branches to use suffix for
-        switch (branch) {
-            case 'main':
-            case 'master':
-            case 'develop':
-                versionSuffix = `${versionSuffixName}${versionSuffixDelimiter}${runNumber}`;
-                break;
-            // todo: hotfix branches
-            default:
-                break;
+        if (branches.includes(branch)) {
+            core.debug('Use suffix for branch');
+            versionSuffix = `${versionSuffixName}${versionSuffixDelimiter}${runNumber}`;
         }
+        // todo: hotfix branches
         const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
         core.notice(`Version: ${buildVersion}`);
         core.setOutput('version', buildVersion);
