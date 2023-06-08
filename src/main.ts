@@ -12,7 +12,7 @@ async function run(): Promise<void> {
   const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter')
 
   core.info(`InputVersion: ${version}, PkgJson Version: ${pkgJson.version}`)
-  core.info(`Brand: ${branch}, Version: ${version}`)
+  core.info(`Branch: ${branch}, Version: ${version}`)
 
   if (!versionSuffix) {
     versionSuffix = 'dev'
