@@ -6,7 +6,7 @@ inputs:
     required: false
     description: "Version to be used, if not specified will read from `package.json`."
     # default: "default value if applicable"
-  preidBranches:
+  preid-branches:
     required: false
     description: "Branches to be used for preid, as comma delimited to use for versioning e.g. 'master,develop'."
     default: "main,master,develop"
@@ -14,7 +14,7 @@ inputs:
     required: false
     description: "Version preid to append e.g. 'dev', if not specified will read from `package.json` or generated via branch name."
     # default: "default value if applicable"
-  preidNumDelimiter:
+  preid-num-delimiter:
     required: false
     description: "Delimiter for build number to use when using preid e.g. preid 'dev' with `.` delimiter be '1.0.0-dev.123' ('dev.123')."
     default: "."

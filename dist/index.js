@@ -47,17 +47,17 @@ function run() {
         const branch = github.context.ref;
         const runNumber = github.context.runNumber;
         let version = core.getInput('version');
+        const preid = core.getInput('preid') || 'dev';
+        const preidDelimiter = core.getInput('preid-num-delimiter') || '.';
+        const preidBranchesInput = core.getInput('preid-branches');
         if (!version) {
             const repoPkgJson = JSON.parse(yield (0, promises_1.readFile)('./package.json', 'utf8'));
             version = repoPkgJson.version;
         }
-        const preidBranchesInput = core.getInput('preidBranches');
         // todo: configurable preid for branches e.g. master=rc, develop=dev
         const preidBranches = preidBranchesInput
             ? coerceArray(preidBranchesInput.split(','))
             : ['main', 'master', 'develop'];
-        const preid = core.getInput('preid') || 'dev';
-        const preidDelimiter = core.getInput('preidNumDelimiter') || '.';
         core.info(`Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
         let versionSuffix;
         if (preidBranches.includes(branch)) {
