@@ -23,7 +23,7 @@ test('test runs', () => {
   // process.env['INPUT_BRANCHES'] = 'master2' // should be false
   process.env['INPUT_BRANCHES'] = 'master,develop,feature/resusable-workflow' // should be true
   process.env['INPUT_VERSION'] = '4.0.1'
-  process.env['INPUT_VERSIONSUFFIX'] = 'rc'
+  process.env['INPUT_PREID'] = 'rc'
   // envs
   process.env['GITHUB_RUN_NUMBER'] = '23'
   process.env['GITHUB_REF'] = 'master'

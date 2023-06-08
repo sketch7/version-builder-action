@@ -39,14 +39,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.coerceArray = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 const promises_1 = __nccwpck_require__(3292);
-function coerceArray(value) {
-    return Array.isArray(value) ? value : [value];
-}
-exports.coerceArray = coerceArray;
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         const branch = github.context.ref;
@@ -57,21 +52,23 @@ function run() {
             version = repoPkgJson.version;
         }
         const branchesInput = core.getInput('branches');
+        // todo: configurable suffix for branches e.g. master=rc, develop=dev
         const branches = branchesInput
             ? coerceArray(branchesInput.split(','))
             : ['main', 'master', 'develop'];
-        const versionSuffixName = core.getInput('versionSuffix') || 'dev';
-        const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter') || '-';
+        const preId = core.getInput('preid') || 'dev';
+        const preIdDelimiter = core.getInput('preidNumDelimiter') || '.';
         core.info(`Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, Branches: ${branches}`);
         let versionSuffix;
         if (branches.includes(branch)) {
             core.debug('Use suffix for branch');
-            versionSuffix = `${versionSuffixName}${versionSuffixDelimiter}${runNumber}`;
+            versionSuffix = `${preId}${preIdDelimiter}${runNumber}`;
         }
         // todo: hotfix branches
         const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
-        core.notice(`Version: ${buildVersion}`);
+        core.notice(`Version: ${buildVersion}, nonSemverVersion: ${version}`);
         core.setOutput('version', buildVersion);
+        core.setOutput('nonSemverVersion', version); // omits the preid and returns just numbers e.g. '1.0.0'
     });
 }
 try {
@@ -80,6 +77,9 @@ try {
 catch (error) {
     if (error instanceof Error)
         core.setFailed(error.message);
+}
+function coerceArray(value) {
+    return Array.isArray(value) ? value : [value];
 }
 
 

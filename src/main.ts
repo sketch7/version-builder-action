@@ -2,10 +2,6 @@ import * as core from '@actions/core'
 import * as github from '@actions/github'
 import {readFile} from 'fs/promises'
 
-export function coerceArray<T>(value: T | T[]): T[] {
-  return Array.isArray(value) ? value : [value]
-}
-
 async function run(): Promise<void> {
   const branch = github.context.ref
   const runNumber = github.context.runNumber
@@ -22,8 +18,8 @@ async function run(): Promise<void> {
     ? coerceArray(branchesInput.split(','))
     : ['main', 'master', 'develop']
 
-  const versionSuffixName = core.getInput('versionSuffix') || 'dev'
-  const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter') || '-'
+  const preId = core.getInput('preid') || 'dev'
+  const preIdDelimiter = core.getInput('preidNumDelimiter') || '.'
 
   core.info(
     `Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, Branches: ${branches}`
@@ -33,18 +29,23 @@ async function run(): Promise<void> {
 
   if (branches.includes(branch)) {
     core.debug('Use suffix for branch')
-    versionSuffix = `${versionSuffixName}${versionSuffixDelimiter}${runNumber}`
+    versionSuffix = `${preId}${preIdDelimiter}${runNumber}`
   }
   // todo: hotfix branches
 
   const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version
 
-  core.notice(`Version: ${buildVersion}`)
+  core.notice(`Version: ${buildVersion}, nonSemverVersion: ${version}`)
   core.setOutput('version', buildVersion)
+  core.setOutput('nonSemverVersion', version) // omits the preid and returns just numbers e.g. '1.0.0'
 }
 
 try {
   run()
 } catch (error) {
   if (error instanceof Error) core.setFailed(error.message)
+}
+
+function coerceArray<T>(value: T | T[]): T[] {
+  return Array.isArray(value) ? value : [value]
 }

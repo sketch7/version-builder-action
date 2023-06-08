@@ -1,19 +1,19 @@
 name: "Version Builder"
-description: "Generates version number based on branch and settings"
+description: "Generates/modifies version number based on version, branch and settings."
 author: "Stephen Lautier"
 inputs:
   version:
     required: false
-    description: "Version to be used, if not specified will read from package.json"
+    description: "Version to be used, if not specified will read from `package.json`."
     # default: "default value if applicable"
-  versionSuffix:
+  preid:
     required: false
-    description: "Version suffix to append e.g. 'dev', if not specified will read from package.json or generated via branch name."
+    description: "Version preid to append e.g. 'dev', if not specified will read from `package.json` or generated via branch name."
     # default: "default value if applicable"
-  versionSuffixDelimiter:
+  preidNumDelimiter:
     required: false
-    description: "Delimiter for build number to use when using suffix e.g. suffix 'dev' would be '1.0.0-dev-123' ('dev-123')"
-    default: "-"
+    description: "Delimiter for build number to use when using preid e.g. preid 'dev' with `.` delimiter be '1.0.0-dev.123' ('dev.123')."
+    default: "."
 runs:
   using: "node16"
   main: "dist/index.js"
