@@ -1,19 +1,38 @@
 import * as core from '@actions/core'
-import {wait} from './wait'
+import * as github from '@actions/github'
+import {readFile} from 'fs/promises'
 
 async function run(): Promise<void> {
-  try {
-    const ms: string = core.getInput('milliseconds')
-    core.debug(`Waiting ${ms} milliseconds ...`) // debug is only output if you set the secret `ACTIONS_STEP_DEBUG` to true
+  const branch = github.context.ref
+  const runNumber = github.context.runNumber
 
-    core.debug(new Date().toTimeString())
-    await wait(parseInt(ms, 10))
-    core.debug(new Date().toTimeString())
+  const pkgJson = JSON.parse(await readFile('./package.json', 'utf8'))
+  const version = core.getInput('version')
+  let versionSuffix = core.getInput('versionSuffix')
 
-    core.setOutput('time', new Date().toTimeString())
-  } catch (error) {
-    if (error instanceof Error) core.setFailed(error.message)
+  core.info(`InputVersion: ${version}, PkgJson Version: ${pkgJson.version}`)
+  core.info(`Brand: ${branch}, Version: ${version}`)
+
+  if (!versionSuffix) {
+    versionSuffix = 'dev'
   }
+
+  switch (branch) {
+    case 'main':
+    case 'master':
+    case 'develop':
+      versionSuffix = `${versionSuffix}-${runNumber}`
+  }
+
+  const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version
+
+  core.notice(`Version: ${buildVersion}`)
+
+  core.setOutput('version', buildVersion)
 }
 
-run()
+try {
+  run()
+} catch (error) {
+  if (error instanceof Error) core.setFailed(error.message)
+}
