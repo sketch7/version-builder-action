@@ -9,6 +9,7 @@ async function run(): Promise<void> {
   const pkgJson = JSON.parse(await readFile('./package.json', 'utf8'))
   const version = core.getInput('version')
   let versionSuffix = core.getInput('versionSuffix')
+  const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter')
 
   core.info(`InputVersion: ${version}, PkgJson Version: ${pkgJson.version}`)
   core.info(`Brand: ${branch}, Version: ${version}`)
@@ -21,13 +22,12 @@ async function run(): Promise<void> {
     case 'main':
     case 'master':
     case 'develop':
-      versionSuffix = `${versionSuffix}-${runNumber}`
+      versionSuffix = `${versionSuffix}${versionSuffixDelimiter}${runNumber}`
   }
 
   const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version
 
   core.notice(`Version: ${buildVersion}`)
-
   core.setOutput('version', buildVersion)
 }
 

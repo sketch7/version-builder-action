@@ -1,11 +1,19 @@
-name: 'Your name here'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+name: "Version Builder"
+description: "Generates version number based on branch and settings"
+author: "Stephen Lautier"
 inputs:
-  milliseconds: # change this
-    required: true
-    description: 'input description here'
-    default: 'default value if applicable'
+  version:
+    required: false
+    description: "Version to be used, if not specified will read from package.json"
+    # default: "default value if applicable"
+  versionSuffix:
+    required: false
+    description: "Version suffix to append e.g. 'dev', if not specified will read from package.json or generated via branch name."
+    # default: "default value if applicable"
+  versionSuffixDelimiter:
+    required: false
+    description: "Delimiter for build number to use when using suffix e.g. suffix 'dev' would be '1.0.0-dev-123' ('dev-123')"
+    default: "-"
 runs:
-  using: 'node16'
-  main: 'dist/index.js'
+  using: "node16"
+  main: "dist/index.js"
