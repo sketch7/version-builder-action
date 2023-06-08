@@ -11,25 +11,25 @@ async function run(): Promise<void> {
     const repoPkgJson = JSON.parse(await readFile('./package.json', 'utf8'))
     version = repoPkgJson.version
   }
-  const branchesInput = core.getInput('branches')
+  const preidBranchesInput = core.getInput('preidBranches')
 
-  // todo: configurable suffix for branches e.g. master=rc, develop=dev
-  const branches = branchesInput
-    ? coerceArray(branchesInput.split(','))
+  // todo: configurable preid for branches e.g. master=rc, develop=dev
+  const preidBranches = preidBranchesInput
+    ? coerceArray(preidBranchesInput.split(','))
     : ['main', 'master', 'develop']
 
-  const preId = core.getInput('preid') || 'dev'
-  const preIdDelimiter = core.getInput('preidNumDelimiter') || '.'
+  const preid = core.getInput('preid') || 'dev'
+  const preidDelimiter = core.getInput('preidNumDelimiter') || '.'
 
   core.info(
-    `Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, Branches: ${branches}`
+    `Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`
   )
 
   let versionSuffix: string | undefined
 
-  if (branches.includes(branch)) {
-    core.debug('Use suffix for branch')
-    versionSuffix = `${preId}${preIdDelimiter}${runNumber}`
+  if (preidBranches.includes(branch)) {
+    core.debug('Use preid for branch')
+    versionSuffix = `${preid}${preidDelimiter}${runNumber}`
   }
   // todo: hotfix branches
 

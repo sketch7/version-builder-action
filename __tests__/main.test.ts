@@ -21,7 +21,7 @@ import {expect, test} from '@jest/globals'
 test('test runs', () => {
   // inputs
   // process.env['INPUT_BRANCHES'] = 'master2' // should be false
-  process.env['INPUT_BRANCHES'] = 'master,develop,feature/resusable-workflow' // should be true
+  process.env['INPUT_PREIDBRANCHES'] = 'master,develop,feature/resusable-workflow' // should be true
   process.env['INPUT_VERSION'] = '4.0.1'
   process.env['INPUT_PREID'] = 'rc'
   // envs
