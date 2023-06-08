@@ -8,21 +8,24 @@ async function run(): Promise<void> {
 
   const pkgJson = JSON.parse(await readFile('./package.json', 'utf8'))
   const version = core.getInput('version')
-  let versionSuffix = core.getInput('versionSuffix')
-  const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter')
+  const versionSuffixName = core.getInput('versionSuffix') || 'dev'
+  const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter') || '-'
 
   core.info(`InputVersion: ${version}, PkgJson Version: ${pkgJson.version}`)
-  core.info(`Branch: ${branch}, Version: ${version}`)
+  core.info(`Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}`)
 
-  if (!versionSuffix) {
-    versionSuffix = 'dev'
-  }
+  let versionSuffix: string | undefined
 
+  // branches to use suffix for
   switch (branch) {
     case 'main':
     case 'master':
     case 'develop':
-      versionSuffix = `${versionSuffix}${versionSuffixDelimiter}${runNumber}`
+      versionSuffix = `${versionSuffixName}${versionSuffixDelimiter}${runNumber}`
+      break
+    // todo: hotfix branches
+    default:
+      break
   }
 
   const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version

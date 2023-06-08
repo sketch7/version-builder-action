@@ -21,6 +21,8 @@ import {expect, test} from '@jest/globals'
 test('test runs', () => {
   process.env['INPUT_VERSION'] = '4.0.1'
   process.env['INPUT_VERSIONSUFFIX'] = 'rc'
+  process.env['GITHUB_RUN_NUMBER'] = '23'
+  process.env['GITHUB_REF'] = 'master'
   const np = process.execPath
   const ip = path.join(__dirname, '..', 'lib', 'main.js')
   const options: cp.ExecFileSyncOptions = {

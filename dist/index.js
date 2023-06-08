@@ -48,18 +48,21 @@ function run() {
         const runNumber = github.context.runNumber;
         const pkgJson = JSON.parse(yield (0, promises_1.readFile)('./package.json', 'utf8'));
         const version = core.getInput('version');
-        let versionSuffix = core.getInput('versionSuffix');
-        const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter');
+        const versionSuffixName = core.getInput('versionSuffix') || 'dev';
+        const versionSuffixDelimiter = core.getInput('versionSuffixDelimiter') || '-';
         core.info(`InputVersion: ${version}, PkgJson Version: ${pkgJson.version}`);
-        core.info(`Branch: ${branch}, Version: ${version}`);
-        if (!versionSuffix) {
-            versionSuffix = 'dev';
-        }
+        core.info(`Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}`);
+        let versionSuffix;
+        // branches to use suffix for
         switch (branch) {
             case 'main':
             case 'master':
             case 'develop':
-                versionSuffix = `${versionSuffix}${versionSuffixDelimiter}${runNumber}`;
+                versionSuffix = `${versionSuffixName}${versionSuffixDelimiter}${runNumber}`;
+                break;
+            // todo: hotfix branches
+            default:
+                break;
         }
         const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
         core.notice(`Version: ${buildVersion}`);
