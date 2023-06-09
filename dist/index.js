@@ -44,7 +44,7 @@ const github = __importStar(__nccwpck_require__(5438));
 const promises_1 = __nccwpck_require__(3292);
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
-        const branch = github.context.ref;
+        const branch = github.context.ref.replace('refs/heads/', '');
         const runNumber = github.context.runNumber;
         let version = core.getInput('version');
         const preid = core.getInput('preid') || 'dev';
@@ -58,7 +58,7 @@ function run() {
         const preidBranches = preidBranchesInput
             ? coerceArray(preidBranchesInput.split(','))
             : ['main', 'master', 'develop'];
-        core.info(`Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
+        core.info(`Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
         let versionSuffix;
         if (preidBranches.includes(branch)) {
             core.debug('Use preid for branch');

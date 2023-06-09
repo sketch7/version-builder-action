@@ -3,7 +3,7 @@ import * as github from '@actions/github'
 import {readFile} from 'fs/promises'
 
 async function run(): Promise<void> {
-  const branch = github.context.ref
+  const branch = github.context.ref.replace('refs/heads/', '')
   const runNumber = github.context.runNumber
 
   let version = core.getInput('version')
@@ -22,7 +22,7 @@ async function run(): Promise<void> {
     : ['main', 'master', 'develop']
 
   core.info(
-    `Branch: ${branch}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`
+    `Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`
   )
 
   let versionSuffix: string | undefined
