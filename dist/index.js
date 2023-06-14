@@ -50,6 +50,7 @@ function run() {
         const preid = core.getInput('preid') || 'dev';
         const preidDelimiter = core.getInput('preid-num-delimiter') || '.';
         const preidBranchesInput = core.getInput('preid-branches');
+        let nonSemverVersion = version;
         if (!version) {
             const repoPkgJson = JSON.parse(yield (0, promises_1.readFile)('./package.json', 'utf8'));
             version = repoPkgJson.version;
@@ -60,15 +61,23 @@ function run() {
             : ['main', 'master', 'develop'];
         core.info(`Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
         let versionSuffix;
+        const versionSegments = version.split('.');
+        const [major, minor, patch] = versionSegments;
         if (preidBranches.includes(branch)) {
             core.debug('Use preid for branch');
             versionSuffix = `${preid}${preidDelimiter}${runNumber}`;
+            if (versionSegments.length === 3) {
+                nonSemverVersion = `${version}.${runNumber}`;
+            }
         }
         // todo: hotfix branches
         const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
-        core.notice(`Version: ${buildVersion}, nonSemverVersion: ${version}`);
+        core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`);
         core.setOutput('version', buildVersion);
-        core.setOutput('nonSemverVersion', version); // omits the preid and returns just numbers e.g. '1.0.0'
+        core.setOutput('nonSemverVersion', nonSemverVersion); // omits the preid and returns just numbers e.g. '1.0.0'
+        core.setOutput('majorVersion', major);
+        core.setOutput('minorVersion', minor);
+        core.setOutput('patchVersion', patch);
     });
 }
 try {
