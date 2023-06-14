@@ -10,6 +10,7 @@ async function run(): Promise<void> {
   const preid = core.getInput('preid') || 'dev'
   const preidDelimiter = core.getInput('preid-num-delimiter') || '.'
   const preidBranchesInput = core.getInput('preid-branches')
+  let nonSemverVersion = version
 
   if (!version) {
     const repoPkgJson = JSON.parse(await readFile('./package.json', 'utf8'))
@@ -26,18 +27,26 @@ async function run(): Promise<void> {
   )
 
   let versionSuffix: string | undefined
-
+  const versionSegments = version.split('.')
+  const [major, minor, patch] = versionSegments
   if (preidBranches.includes(branch)) {
     core.debug('Use preid for branch')
     versionSuffix = `${preid}${preidDelimiter}${runNumber}`
+
+    if (versionSegments.length === 3) {
+      nonSemverVersion = `${version}.${runNumber}`
+    }
   }
   // todo: hotfix branches
 
   const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version
 
-  core.notice(`Version: ${buildVersion}, nonSemverVersion: ${version}`)
+  core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`)
   core.setOutput('version', buildVersion)
-  core.setOutput('nonSemverVersion', version) // omits the preid and returns just numbers e.g. '1.0.0'
+  core.setOutput('nonSemverVersion', nonSemverVersion) // omits the preid and returns just numbers e.g. '1.0.0'
+  core.setOutput('majorVersion', major)
+  core.setOutput('minorVersion', minor)
+  core.setOutput('patchVersion', patch)
 }
 
 try {
