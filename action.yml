@@ -10,6 +10,10 @@ inputs:
     required: false
     description: "Forces preid versioning even if branch not satisfied."
     default: "false"
+  force-stable:
+    required: false
+    description: "Forces non-preid versioning even if branch not satisfied."
+    default: "false"
   preid-branches:
     required: false
     description: "Branches to be used for preid, as comma delimited to use for versioning e.g. 'master,develop'."

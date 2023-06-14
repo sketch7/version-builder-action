@@ -1,6 +1,7 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
 import {readFile} from 'fs/promises'
+import {coerceArray, isPrerelease} from './utils'
 
 async function run(): Promise<void> {
   const branch = github.context.ref.replace('refs/heads/', '')
@@ -10,7 +11,9 @@ async function run(): Promise<void> {
   const preid = core.getInput('preid') || 'dev'
   const preidDelimiter = core.getInput('preid-num-delimiter') || '.'
   const preidBranchesInput = core.getInput('preid-branches')
-  const isForcePreid = !!core.getInput('force-preid')
+  const isForcePreid = core.getBooleanInput('force-preid')
+  const isForceStable = core.getBooleanInput('force-stable')
+
   let nonSemverVersion = version
 
   if (!version) {
@@ -30,7 +33,14 @@ async function run(): Promise<void> {
   let versionSuffix: string | undefined
   const versionSegments = version.split('.')
   const [major, minor, patch] = versionSegments
-  if (isForcePreid || preidBranches.includes(branch)) {
+
+  const isPreRel = isPrerelease({
+    branch,
+    preidBranches,
+    isForcePreid,
+    isForceStable
+  })
+  if (isPreRel) {
     core.debug('Use preid for branch')
     versionSuffix = `${preid}${preidDelimiter}${runNumber}`
 
@@ -48,14 +58,11 @@ async function run(): Promise<void> {
   core.setOutput('majorVersion', major)
   core.setOutput('minorVersion', minor)
   core.setOutput('patchVersion', patch)
+  core.setOutput('isPrerelease', isPreRel)
 }
 
 try {
   run()
 } catch (error) {
   if (error instanceof Error) core.setFailed(error.message)
-}
-
-function coerceArray<T>(value: T | T[]): T[] {
-  return Array.isArray(value) ? value : [value]
 }

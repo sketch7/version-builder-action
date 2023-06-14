@@ -42,6 +42,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 const promises_1 = __nccwpck_require__(3292);
+const utils_1 = __nccwpck_require__(918);
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         const branch = github.context.ref.replace('refs/heads/', '');
@@ -50,7 +51,8 @@ function run() {
         const preid = core.getInput('preid') || 'dev';
         const preidDelimiter = core.getInput('preid-num-delimiter') || '.';
         const preidBranchesInput = core.getInput('preid-branches');
-        const isForcePreid = !!core.getInput('force-preid');
+        const isForcePreid = core.getBooleanInput('force-preid');
+        const isForceStable = core.getBooleanInput('force-stable');
         let nonSemverVersion = version;
         if (!version) {
             const repoPkgJson = JSON.parse(yield (0, promises_1.readFile)('./package.json', 'utf8'));
@@ -58,13 +60,19 @@ function run() {
         }
         // todo: configurable preid for branches e.g. master=rc, develop=dev
         const preidBranches = preidBranchesInput
-            ? coerceArray(preidBranchesInput.split(','))
+            ? (0, utils_1.coerceArray)(preidBranchesInput.split(','))
             : ['main', 'master', 'develop'];
         core.info(`isForcePreid: ${isForcePreid}, Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
         let versionSuffix;
         const versionSegments = version.split('.');
         const [major, minor, patch] = versionSegments;
-        if (isForcePreid || preidBranches.includes(branch)) {
+        const isPreRel = (0, utils_1.isPrerelease)({
+            branch,
+            preidBranches,
+            isForcePreid,
+            isForceStable
+        });
+        if (isPreRel) {
             core.debug('Use preid for branch');
             versionSuffix = `${preid}${preidDelimiter}${runNumber}`;
             if (versionSegments.length === 3) {
@@ -79,6 +87,7 @@ function run() {
         core.setOutput('majorVersion', major);
         core.setOutput('minorVersion', minor);
         core.setOutput('patchVersion', patch);
+        core.setOutput('isPrerelease', isPreRel);
     });
 }
 try {
@@ -88,9 +97,26 @@ catch (error) {
     if (error instanceof Error)
         core.setFailed(error.message);
 }
+
+
+/***/ }),
+
+/***/ 918:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isPrerelease = exports.coerceArray = void 0;
 function coerceArray(value) {
     return Array.isArray(value) ? value : [value];
 }
+exports.coerceArray = coerceArray;
+function isPrerelease(input) {
+    return (input.isForcePreid ||
+        (!input.isForceStable && input.preidBranches.includes(input.branch)));
+}
+exports.isPrerelease = isPrerelease;
 
 
 /***/ }),
