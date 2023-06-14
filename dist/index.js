@@ -50,6 +50,7 @@ function run() {
         const preid = core.getInput('preid') || 'dev';
         const preidDelimiter = core.getInput('preid-num-delimiter') || '.';
         const preidBranchesInput = core.getInput('preid-branches');
+        const isForcePreid = !!core.getInput('force-preid');
         let nonSemverVersion = version;
         if (!version) {
             const repoPkgJson = JSON.parse(yield (0, promises_1.readFile)('./package.json', 'utf8'));
@@ -59,11 +60,11 @@ function run() {
         const preidBranches = preidBranchesInput
             ? coerceArray(preidBranchesInput.split(','))
             : ['main', 'master', 'develop'];
-        core.info(`Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
+        core.info(`isForcePreid: ${isForcePreid}, Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
         let versionSuffix;
         const versionSegments = version.split('.');
         const [major, minor, patch] = versionSegments;
-        if (preidBranches.includes(branch)) {
+        if (isForcePreid || preidBranches.includes(branch)) {
             core.debug('Use preid for branch');
             versionSuffix = `${preid}${preidDelimiter}${runNumber}`;
             if (versionSegments.length === 3) {

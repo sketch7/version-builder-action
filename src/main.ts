@@ -10,6 +10,7 @@ async function run(): Promise<void> {
   const preid = core.getInput('preid') || 'dev'
   const preidDelimiter = core.getInput('preid-num-delimiter') || '.'
   const preidBranchesInput = core.getInput('preid-branches')
+  const isForcePreid = !!core.getInput('force-preid')
   let nonSemverVersion = version
 
   if (!version) {
@@ -23,13 +24,13 @@ async function run(): Promise<void> {
     : ['main', 'master', 'develop']
 
   core.info(
-    `Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`
+    `isForcePreid: ${isForcePreid}, Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`
   )
 
   let versionSuffix: string | undefined
   const versionSegments = version.split('.')
   const [major, minor, patch] = versionSegments
-  if (preidBranches.includes(branch)) {
+  if (isForcePreid || preidBranches.includes(branch)) {
     core.debug('Use preid for branch')
     versionSuffix = `${preid}${preidDelimiter}${runNumber}`
 
