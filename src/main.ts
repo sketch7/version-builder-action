@@ -14,12 +14,11 @@ async function run(): Promise<void> {
   const isForcePreid = core.getBooleanInput('force-preid')
   const isForceStable = core.getBooleanInput('force-stable')
 
-  let nonSemverVersion = version
-
   if (!version) {
     const repoPkgJson = JSON.parse(await readFile('./package.json', 'utf8'))
     version = repoPkgJson.version
   }
+  let nonSemverVersion = version
 
   // todo: configurable preid for branches e.g. master=rc, develop=dev
   const preidBranches = preidBranchesInput
