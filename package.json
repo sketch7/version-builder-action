@@ -1,6 +1,6 @@
 {
   "name": "@ssv/version-builder-action",
-  "version": "0.2.0",
+  "version": "1.2.0",
   "author": "Stephen Lautier <stephen.lautier@outlook.com>",
   "private": true,
   "homepage": "https://github.com/sketch7/version-builder-action",
