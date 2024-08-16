@@ -4,19 +4,6 @@ import * as path from "path"
 import { expect, test, describe } from "@jest/globals"
 import { isPrerelease } from "../src/utils"
 
-// test('throws invalid number', async () => {
-//   const input = parseInt('foo', 10)
-//   await expect(wait(input)).rejects.toThrow('milliseconds not a number')
-// })
-
-// test('wait 500 ms', async () => {
-//   const start = new Date()
-//   await wait(500)
-//   const end = new Date()
-//   var delta = Math.abs(end.getTime() - start.getTime())
-//   expect(delta).toBeGreaterThan(450)
-// })
-
 describe("isPrerelease", () => {
 	const dataset = [
 		// prerelease
@@ -73,15 +60,15 @@ describe("isPrerelease", () => {
 		}
 	]
 
-	dataset.forEach(({ name, input, expected }) => {
+	for (const { name, input, expected } of dataset) {
 		test(`given ${name} (${JSON.stringify(input)}) should be ${expected}`, () => {
 			expect(isPrerelease(input)).toBe(expected)
 		})
-	})
+	}
 })
 
 // shows how the runner will run a javascript action with env / stdout protocol
-test("test runs", () => {
+test("runs", () => {
 	// inputs
 	// process.env['INPUT_PREID-BRANCHES'] = 'master2' // should be false
 	process.env["INPUT_PREID-BRANCHES"] =
@@ -98,5 +85,7 @@ test("test runs", () => {
 	const options: cp.ExecFileSyncOptions = {
 		env: process.env
 	}
-	console.log(cp.execFileSync(np, [ip], options).toString())
+	const result = cp.execFileSync(np, [ip], options).toString()
+	console.log(result)
+	expect(result).not.toBeNull()
 })
