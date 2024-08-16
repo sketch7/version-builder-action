@@ -1,9 +1,9 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
-import {readFile} from 'fs/promises'
-import {coerceArray, isPrerelease} from './utils'
+import { readFile } from 'fs/promises'
+import { coerceArray, isPrerelease } from './utils'
 
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   const branch = github.context.ref.replace('refs/heads/', '')
   const runNumber = github.context.runNumber
 
@@ -58,10 +58,4 @@ async function run(): Promise<void> {
   core.setOutput('minorVersion', minor)
   core.setOutput('patchVersion', patch)
   core.setOutput('isPrerelease', isPreRel)
-}
-
-try {
-  run()
-} catch (error) {
-  if (error instanceof Error) core.setFailed(error.message)
 }
