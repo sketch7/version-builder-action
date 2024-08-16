@@ -1,6 +1,13 @@
 name: "Version Builder"
 description: "Generates/modifies version number based on version, branch and settings."
 author: "Stephen Lautier"
+
+# Add your action's branding here. This will appear on the GitHub Marketplace.
+branding:
+  icon: "heart"
+  color: "red"
+
+# Define your inputs here.
 inputs:
   version:
     required: false
@@ -26,6 +33,22 @@ inputs:
     required: false
     description: "Delimiter for build number to use when using preid e.g. preid 'dev' with `.` delimiter be '1.0.0-dev.123' ('dev.123')."
     default: "."
+
+# Define your outputs here.
+outputs:
+  version:
+    description: "Build version generated e.g. '1.5.6-dev.123'."
+  nonSemverVersion:
+    description: "Omits the preid and returns just number e.g. '1.5.6'"
+  majorVersion:
+    description: "Returns the major version e.g. '1'"
+  minorVersion:
+    description: "Returns the minor version e.g. '5'"
+  patchVersion:
+    description: "Returns the patch version e.g. '6'"
+  isPrerelease:
+    description: "Returns whether the version is a prerelease version e.g. 'true' or 'false'."
+
 runs:
-  using: "node16"
+  using: "node20"
   main: "dist/index.js"

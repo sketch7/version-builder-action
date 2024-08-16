@@ -1,6 +1,6 @@
 {
   "name": "@ssv/version-builder-action",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Generates/modifies version number based on version, branch and settings.",
   "main": "lib/main.js",
