@@ -12,5 +12,13 @@
   "arrowParens": "avoid",
   "proseWrap": "always",
   "htmlWhitespaceSensitivity": "css",
-  "endOfLine": "lf"
+  "endOfLine": "lf",
+  "overrides": [
+    {
+      "files": "*.json",
+      "options": {
+        "useTabs": false
+      }
+    }
+  ]
 }

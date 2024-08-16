@@ -1,5 +1,6 @@
 name: "Version Builder"
-description: "Generates/modifies version number based on version, branch and settings."
+description:
+  "Generates/modifies version number based on version, branch and settings."
 author: "Stephen Lautier"
 
 # Add your action's branding here. This will appear on the GitHub Marketplace.
@@ -11,7 +12,8 @@ branding:
 inputs:
   version:
     required: false
-    description: "Version to be used, if not specified will read from `package.json`."
+    description:
+      "Version to be used, if not specified will read from `package.json`."
     # default: "default value if applicable"
   force-preid:
     required: false
