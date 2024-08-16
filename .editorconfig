@@ -6,10 +6,11 @@ charset = utf-8
 indent_style = space
 end_of_line = lf
 
-# [*.{js,ts}]
-# trim_trailing_whitespace = true
-# spaces_around_operators = inside
-# insert_final_newline = false
+[*.{js,ts}]
+indent_style = tab
+trim_trailing_whitespace = true
+spaces_around_operators = inside
+insert_final_newline = false
 
 [package.json]
 insert_final_newline = true
