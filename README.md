@@ -1,4 +1,5 @@
-# Create a GitHub Action Using TypeScript
+# Version Builder
+Generates new version based on specified version (via input, or will read `package.json` of the repo) and add preid based on branches.
 
 [![GitHub Super-Linter](https://github.com/actions/typescript-action/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter)
 ![CI](https://github.com/actions/typescript-action/actions/workflows/ci.yml/badge.svg)
