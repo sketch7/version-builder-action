@@ -23703,14 +23703,14 @@ async function run() {
     }
   }
   const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
-  const preidOutput = isPreRel ? preid : "";
+  const tag = isPreRel ? preid : "";
   notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`);
   setOutput("version", buildVersion);
   setOutput("nonSemverVersion", nonSemverVersion);
   setOutput("majorVersion", major);
   setOutput("minorVersion", minor);
   setOutput("patchVersion", patch);
-  setOutput("preid", preidOutput);
+  setOutput("tag", tag);
   setOutput("isPrerelease", isPreRel);
 }
 
