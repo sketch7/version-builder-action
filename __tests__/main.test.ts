@@ -1,7 +1,7 @@
-import * as process from "process"
 import * as cp from "child_process"
 import * as path from "path"
-import { expect, test, describe } from "@jest/globals"
+import * as process from "process"
+import { describe, expect, test } from "vitest"
 import { isPrerelease } from "../src/utils"
 
 describe("isPrerelease", () => {
