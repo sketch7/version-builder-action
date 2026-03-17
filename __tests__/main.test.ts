@@ -71,8 +71,7 @@ describe("isPrerelease", () => {
 test("runs", () => {
 	// inputs
 	// process.env['INPUT_PREID-BRANCHES'] = 'master2' // should be false
-	process.env["INPUT_PREID-BRANCHES"] =
-		"master,develop,feature/resusable-workflow" // should be true
+	process.env["INPUT_PREID-BRANCHES"] = "master,develop,feature/resusable-workflow" // should be true
 	process.env["INPUT_VERSION"] = "4.0.1"
 	process.env["INPUT_PREID"] = "rc"
 	process.env["INPUT_FORCE-PREID"] = "false"

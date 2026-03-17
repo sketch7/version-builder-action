@@ -2,24 +2,12 @@
   "name": "@ssv/version-builder-action",
   "version": "1.2.1",
   "private": true,
-  "keywords": [
-    "actions",
-    "autoversion",
-    "node",
-    "semver",
-    "setup",
-    "version"
-  ],
-  "homepage": "https://github.com/sketch7/version-builder-action",
-  "bugs": {
-    "url": "https://github.com/sketch7/version-builder-action/issues"
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=24"
   },
-  "license": "MIT",
   "author": "Stephen Lautier <stephen.lautier@outlook.com>",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/sketch7/version-builder-action.git"
-  },
+  "license": "MIT",
   "exports": {
     ".": "./dist/index.js"
   },
@@ -48,8 +36,20 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   },
-  "engines": {
-    "node": ">=24"
+  "keywords": [
+    "actions",
+    "autoversion",
+    "node",
+    "semver",
+    "setup",
+    "version"
+  ],
+  "homepage": "https://github.com/sketch7/version-builder-action",
+  "bugs": {
+    "url": "https://github.com/sketch7/version-builder-action/issues"
   },
-  "packageManager": "pnpm@10.32.1"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sketch7/version-builder-action.git"
+  }
 }

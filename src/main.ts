@@ -21,9 +21,7 @@ export async function run(): Promise<void> {
 	let nonSemverVersion = version
 
 	// todo: configurable preid for branches e.g. master/main=rc, develop=dev
-	const preidBranches = preidBranchesInput
-		? coerceArray(preidBranchesInput.split(","))
-		: ["main", "master", "develop"]
+	const preidBranches = preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main", "master", "develop"]
 
 	core.info(
 		`isForcePreid: ${isForcePreid}, Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`
