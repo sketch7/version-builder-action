@@ -1,7 +1,7 @@
-import * as process from "process"
 import * as cp from "child_process"
 import * as path from "path"
-import { expect, test, describe } from "@jest/globals"
+import * as process from "process"
+import { describe, expect, test } from "vitest"
 import { isPrerelease } from "../src/utils"
 
 describe("isPrerelease", () => {
@@ -71,8 +71,7 @@ describe("isPrerelease", () => {
 test("runs", () => {
 	// inputs
 	// process.env['INPUT_PREID-BRANCHES'] = 'master2' // should be false
-	process.env["INPUT_PREID-BRANCHES"] =
-		"master,develop,feature/resusable-workflow" // should be true
+	process.env["INPUT_PREID-BRANCHES"] = "master,develop,feature/resusable-workflow" // should be true
 	process.env["INPUT_VERSION"] = "4.0.1"
 	process.env["INPUT_PREID"] = "rc"
 	process.env["INPUT_FORCE-PREID"] = "false"

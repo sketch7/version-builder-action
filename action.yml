@@ -1,6 +1,5 @@
 name: "Version Builder"
-description:
-  "Generates/modifies version number based on version, branch and settings."
+description: "Generates/modifies version number based on version, branch and settings."
 author: "Stephen Lautier"
 
 # Add your action's branding here. This will appear on the GitHub Marketplace.
@@ -12,8 +11,7 @@ branding:
 inputs:
   version:
     required: false
-    description:
-      "Version to be used, if not specified will read from `package.json`."
+    description: "Version to be used, if not specified will read from `package.json`."
     # default: "default value if applicable"
   force-preid:
     required: false
@@ -25,21 +23,17 @@ inputs:
     default: "false"
   preid-branches:
     required: false
-    description:
-      "Branches to be used for preid, as comma delimited to use for versioning
+    description: "Branches to be used for preid, as comma delimited to use for versioning
       e.g. 'master,develop'."
     default: "main,master,develop"
   preid:
     required: false
-    description:
-      "Version preid to append e.g. 'dev', if not specified will read from
+    description: "Version preid to append e.g. 'dev', if not specified will read from
       `package.json` or generated via branch name."
     # default: "default value if applicable"
   preid-num-delimiter:
     required: false
-    description:
-      "Delimiter for build number to use when using preid e.g. preid 'dev' with
-      `.` delimiter be '1.0.0-dev.123' ('dev.123')."
+    description: "Delimiter for build number to use when using preid e.g. preid 'dev' with       `.` delimiter be '1.0.0-dev.123' ('dev.123')."
     default: "."
 
 # Define your outputs here.
@@ -54,11 +48,12 @@ outputs:
     description: "Returns the minor version e.g. '5'"
   patchVersion:
     description: "Returns the patch version e.g. '6'"
+  tag:
+    description: "Returns the tag e.g. 'dev' based on preid, when isPrerelease else empty string."
   isPrerelease:
-    description:
-      "Returns whether the version is a prerelease version e.g. 'true' or
+    description: "Returns whether the version is a prerelease version e.g. 'true' or
       'false'."
 
 runs:
-  using: "node20"
+  using: "node24"
   main: "dist/index.js"
