@@ -20,7 +20,7 @@ export async function run(): Promise<void> {
 	}
 	let nonSemverVersion = version
 
-	// todo: configurable preid for branches e.g. master=rc, develop=dev
+	// todo: configurable preid for branches e.g. master/main=rc, develop=dev
 	const preidBranches = preidBranchesInput
 		? coerceArray(preidBranchesInput.split(","))
 		: ["main", "master", "develop"]
@@ -50,6 +50,7 @@ export async function run(): Promise<void> {
 	// todo: hotfix branches
 
 	const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version
+	const preidOutput = isPreRel ? preid : ""
 
 	core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`)
 	core.setOutput("version", buildVersion)
@@ -57,5 +58,6 @@ export async function run(): Promise<void> {
 	core.setOutput("majorVersion", major)
 	core.setOutput("minorVersion", minor)
 	core.setOutput("patchVersion", patch)
+	core.setOutput("preid", preidOutput)
 	core.setOutput("isPrerelease", isPreRel)
 }
