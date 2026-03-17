@@ -12,8 +12,8 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup",
-    "build:watch": "tsup --watch",
+    "build": "tsdown",
+    "build:watch": "tsdown --watch",
     "bundle": "pnpm run format:write && pnpm run build",
     "ci-test": "vitest run --coverage",
     "format:check": "oxfmt --check",
@@ -32,7 +32,7 @@
     "@vitest/coverage-v8": "^4.1.0",
     "oxfmt": "^0.41.0",
     "oxlint": "^1.56.0",
-    "tsup": "^8.5.1",
+    "tsdown": "^0.21.4",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   },

@@ -1,13 +1,16 @@
-import { defineConfig } from "tsup"
+import { defineConfig } from "tsdown"
 
 export default defineConfig({
 	entry: ["src/index.ts"],
 	format: ["cjs"],
 	target: "node24",
-	bundle: true,
-	noExternal: [/.*/],
+	deps: {
+		alwaysBundle: [/.*/],
+		onlyBundle: false
+	},
 	minify: false,
 	sourcemap: true,
 	outDir: "dist",
+	outExtensions: () => ({ js: ".js" }),
 	clean: true
 })
