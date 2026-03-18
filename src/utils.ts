@@ -1,3 +1,5 @@
+import { execSync } from "child_process"
+
 export function coerceArray<T>(value: T | T[]): T[] {
 	return Array.isArray(value) ? value : [value]
 }
@@ -119,4 +121,38 @@ export function resolveTag(input: { resolvedPreid: string | null; branch: string
 	const currentVersion = parseBranchVersion(input.branch)
 	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest"
 	return `${input.branch}-lts`
+}
+
+/**
+ * Counts commits on HEAD since the last git commit that touched `filePath`.
+ * Returns 0 if the file has never been committed, or if git is unavailable.
+ */
+export function getCommitCountSinceFileChange(
+	filePath: string,
+	execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" }),
+): number {
+	try {
+		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim()
+		if (!sha) return 0
+		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim()
+		return parseInt(count, 10) || 0
+	} catch {
+		return 0
+	}
+}
+
+/**
+ * Lists all remote branch names from `origin` via `git ls-remote --heads origin`.
+ * Returns an empty array if git is unavailable or the remote cannot be reached.
+ */
+export function listRemoteBranchNames(execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" })): string[] {
+	try {
+		const output = execFn("git ls-remote --heads origin")
+		return output
+			.split("\n")
+			.map(line => /refs\/heads\/(.+)$/.exec(line)?.[1]?.trim() ?? null)
+			.filter((name): name is string => name !== null && name.length > 0)
+	} catch {
+		return []
+	}
 }

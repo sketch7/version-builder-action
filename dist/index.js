@@ -32,6 +32,8 @@ let crypto = require("crypto");
 crypto = __toESM(crypto);
 let fs = require("fs");
 fs = __toESM(fs);
+let child_process = require("child_process");
+child_process = __toESM(child_process);
 let fs_promises = require("fs/promises");
 
 //#region node_modules/.pnpm/@actions+core@3.0.0/node_modules/@actions/core/lib/utils.js
@@ -17169,11 +17171,6 @@ var __awaiter = void 0 && (void 0).__awaiter || function(thisArg, _arguments, P,
 		step((generator = generator.apply(thisArg, _arguments || [])).next());
 	});
 };
-function getAuthString(token, options) {
-	if (!token && !options.auth) throw new Error("Parameter token or opts.auth is required");
-	else if (token && options.auth) throw new Error("Parameters token and opts.auth may not both be specified");
-	return typeof options.auth === "string" ? options.auth : `token ${token}`;
-}
 function getProxyAgent(destinationUrl) {
 	return new import_lib.HttpClient().getAgent(destinationUrl);
 }
@@ -19602,31 +19599,10 @@ const defaults = {
 	}
 };
 const GitHub = Octokit.plugin(restEndpointMethods, paginateRest).defaults(defaults);
-/**
-* Convience function to correctly format Octokit Options to pass into the constructor.
-*
-* @param     token    the repo PAT or GITHUB_TOKEN
-* @param     options  other options to set
-*/
-function getOctokitOptions(token, options) {
-	const opts = Object.assign({}, options || {});
-	const auth = getAuthString(token, opts);
-	if (auth) opts.auth = auth;
-	return opts;
-}
 
 //#endregion
 //#region node_modules/.pnpm/@actions+github@9.0.0/node_modules/@actions/github/lib/github.js
 const context = new Context();
-/**
-* Returns a hydrated octokit ready to use for GitHub Actions
-*
-* @param     token    the repo PAT or GITHUB_TOKEN
-* @param     options  other options to set
-*/
-function getOctokit(token, options, ...additionalPlugins) {
-	return new (GitHub.plugin(...additionalPlugins))(getOctokitOptions(token, options));
-}
 
 //#endregion
 //#region src/utils.ts
@@ -19722,12 +19698,36 @@ function resolveTag(input) {
 	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest";
 	return `${input.branch}-lts`;
 }
+/**
+* Counts commits on HEAD since the last git commit that touched `filePath`.
+* Returns 0 if the file has never been committed, or if git is unavailable.
+*/
+function getCommitCountSinceFileChange(filePath, execFn = (cmd) => (0, child_process.execSync)(cmd, { encoding: "utf8" })) {
+	try {
+		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim();
+		if (!sha) return 0;
+		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim();
+		return parseInt(count, 10) || 0;
+	} catch {
+		return 0;
+	}
+}
+/**
+* Lists all remote branch names from `origin` via `git ls-remote --heads origin`.
+* Returns an empty array if git is unavailable or the remote cannot be reached.
+*/
+function listRemoteBranchNames(execFn = (cmd) => (0, child_process.execSync)(cmd, { encoding: "utf8" })) {
+	try {
+		return execFn("git ls-remote --heads origin").split("\n").map((line) => /refs\/heads\/(.+)$/.exec(line)?.[1]?.trim() ?? null).filter((name) => name !== null && name.length > 0);
+	} catch {
+		return [];
+	}
+}
 
 //#endregion
 //#region src/main.ts
 async function run() {
 	const branch = context.ref.replace("refs/heads/", "");
-	const runNumber = context.runNumber;
 	let version = getInput("version");
 	const defaultPreid = getInput("preid") || "dev";
 	const preidDelimiter = getInput("preid-num-delimiter") || ".";
@@ -19735,7 +19735,6 @@ async function run() {
 	const stableBranchesInput = getInput("stable-branches");
 	const forcePreid = getBooleanInput("force-preid");
 	const forceStable = getBooleanInput("force-stable");
-	const token = getInput("token");
 	if (!version) version = JSON.parse(await (0, fs_promises.readFile)("./package.json", "utf8")).version;
 	const baseVersion = stripPreid(version);
 	let nonSemverVersion = baseVersion;
@@ -19746,7 +19745,8 @@ async function run() {
 		"vnext:next"
 	]);
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
-	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
+	const commitCount = getCommitCountSinceFileChange("package.json");
+	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	let versionSuffix;
 	const versionSegments = baseVersion.split(".");
 	const [major, minor, patch] = versionSegments;
@@ -19761,24 +19761,15 @@ async function run() {
 	const isPreRel = resolvedPreid !== null;
 	if (isPreRel) {
 		debug("Use preid for branch");
-		versionSuffix = `${resolvedPreid}${preidDelimiter}${runNumber}`;
-		if (versionSegments.length === 3) nonSemverVersion = `${baseVersion}.${runNumber}`;
+		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`;
+		if (versionSegments.length === 3) nonSemverVersion = `${baseVersion}.${commitCount}`;
 	}
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : version;
 	const preidOutput = isPreRel ? resolvedPreid : "";
-	let stableBranchNames = [];
-	if (!isPreRel && token) {
-		const octokit = getOctokit(token);
-		for await (const response of octokit.paginate.iterator(octokit.rest.repos.listBranches, {
-			owner: context.repo.owner,
-			repo: context.repo.repo,
-			per_page: 100
-		})) for (const b of response.data) if (matchesBranchPattern(b.name, stableBranches)) stableBranchNames.push(b.name);
-	}
 	const tag = resolveTag({
 		resolvedPreid,
 		branch,
-		stableBranchNames
+		stableBranchNames: listRemoteBranchNames().filter((name) => matchesBranchPattern(name, stableBranches))
 	});
 	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);

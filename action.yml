@@ -44,10 +44,6 @@ inputs:
     required: false
     description: "Delimiter for build number to use when using preid e.g. preid 'dev' with       `.` delimiter be '1.0.0-dev.123' ('dev.123')."
     default: "."
-  token:
-    required: false
-    description: "GitHub token used to list repository branches for stable-tag detection. Defaults to the built-in `github.token`."
-    default: ${{ github.token }}
 
 # Define your outputs here.
 outputs:
