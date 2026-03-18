@@ -12,21 +12,21 @@ permissions:
   contents: read
 
 jobs:
-  test-typescript:
-    name: TypeScript Tests
+  checks:
+    name: Checks (Format, Lint, Test)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
 
-      - name: Setup Node.js
+      - name: Setup Node
         id: setup-node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Test Local Action
         id: test-action
