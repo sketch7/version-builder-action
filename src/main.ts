@@ -57,5 +57,5 @@ export async function run(): Promise<void> {
 	core.setOutput("minorVersion", minor)
 	core.setOutput("patchVersion", patch)
 	core.setOutput("preid", preidOutput)
-	core.setOutput("isPrerelease", isPreRel)
+	core.setOutput("isPrereleaseX", isPreRel)
 }
