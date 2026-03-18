@@ -297,6 +297,7 @@ test("runs", () => {
 	process.env["INPUT_FORCE-STABLE"] = "false"
 	// envs
 	process.env["GITHUB_RUN_NUMBER"] = "23"
+	// process.env["GITHUB_REF"] = "refs/heads/main"
 	process.env["GITHUB_REF"] = "refs/heads/feature/my-workflow"
 	const np = process.execPath
 	const ip = path.join(__dirname, "..", "dist", "index.js")
