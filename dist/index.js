@@ -19622,7 +19622,8 @@ function parsePreidBranches(entries) {
 	});
 }
 /**
-* Returns true when the branch matches any of the given regex patterns (full string test).
+* Returns true when the branch matches any of the given regex patterns using RegExp.test.
+* Note: patterns are not auto-anchored; use ^ and $ in the pattern if full-string matches are required.
 */
 function matchesBranchPattern(branch, patterns) {
 	return patterns.some((pattern) => new RegExp(pattern).test(branch));
