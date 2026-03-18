@@ -36,7 +36,7 @@ both semver and non-semver variants as outputs.
 | `majorVersion`     | `1`             | Major version segment.                                                      |
 | `minorVersion`     | `5`             | Minor version segment.                                                      |
 | `patchVersion`     | `6`             | Patch version segment.                                                      |
-| `tag`              | `dev`           | The preid string when pre-release, otherwise an empty string.               |
+| `preid`            | `dev`           | The preid string when pre-release, otherwise an empty string.               |
 | `isPrerelease`     | `true`          | Whether the generated version is a prerelease.                              |
 
 ## Usage
@@ -58,7 +58,7 @@ steps:
     run: |
       echo "Version:          ${{ steps.version.outputs.version }}"
       echo "Non-semver:       ${{ steps.version.outputs.nonSemverVersion }}"
-      echo "Tag:              ${{ steps.version.outputs.tag }}"
+      echo "Preid:              ${{ steps.version.outputs.preid }}"
       echo "Is pre-release:   ${{ steps.version.outputs.isPrerelease }}"
 ```
 
