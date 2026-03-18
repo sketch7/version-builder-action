@@ -398,7 +398,7 @@ describe("resolveTag", () => {
 			expected: "latest",
 		},
 		{
-			name: "lower stable branch returns branch-lts",
+			name: "lower stable branch returns v1-lts",
 			input: { resolvedPreid: null, branch: "v1", stableBranchNames: ["v1", "v2"] },
 			expected: "v1-lts",
 		},
@@ -408,9 +408,9 @@ describe("resolveTag", () => {
 			expected: "latest",
 		},
 		{
-			name: "1.x style — lower returns branch-lts",
+			name: "1.x style — lower returns v1-lts",
 			input: { resolvedPreid: null, branch: "1.x", stableBranchNames: ["1.x", "2.x"] },
-			expected: "1.x-lts",
+			expected: "v1-lts",
 		},
 		{
 			name: "no parseable branch names falls back to latest",

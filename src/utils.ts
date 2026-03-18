@@ -105,7 +105,7 @@ function compareVersionArrays(a: number[], b: number[]): number {
  * Resolves the dist-tag string for the current build.
  * - Pre-release builds → returns the `resolvedPreid` value (e.g. `"rc"`, `"dev"`).
  * - Stable builds → compares the current branch against all detected stable branches;
- *   the branch with the highest semver version emits `"latest"`, all others emit `"<branch>-lts"`.
+ *   the branch with the highest semver version emits `"latest"`, all others emit `"v{major}-lts"`.
  *   Falls back to `"latest"` when no branch versions can be parsed.
  */
 export function resolveTag(input: { resolvedPreid: string | null; branch: string; stableBranchNames: string[] }): string {
@@ -120,7 +120,8 @@ export function resolveTag(input: { resolvedPreid: string | null; branch: string
 	const highest = versioned.reduce((best, cur) => (compareVersionArrays(cur.version, best.version) > 0 ? cur : best))
 	const currentVersion = parseBranchVersion(input.branch)
 	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest"
-	return `${input.branch}-lts`
+	const major = currentVersion?.[0] ?? parseBranchVersion(input.branch)?.[0]
+	return major !== undefined ? `v${major}-lts` : "latest"
 }
 
 /**
