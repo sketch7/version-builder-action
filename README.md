@@ -83,16 +83,19 @@ steps:
 
 ## Publishing a New Release
 
-This project includes a helper script, [`script/release`](./script/release),
-that streamlines tagging and pushing new releases.
+Releases are handled entirely by the
+[Release workflow](.github/workflows/release.yml) — no local tooling needed.
 
-1. **Retrieve the latest tag** — the script fetches the most recent SemVer tag
-   from local repository data.
-1. **Prompt for a new tag** — enter a new tag in `vX.X.X` format. Remember to
-   update `version` in `package.json` before running the script.
-1. **Tag the release** — the script tags the commit and syncs the major tag
-   (e.g. `v1`) with the new release tag (e.g. `v1.2.0`). For a new major
-   version it automatically creates a `releases/v#` branch for the previous
-   major.
-1. **Push to remote** — commits, tags, and branches are pushed. Then create a
-   GitHub Release so consumers can reference the new tag.
+1. **Bump the version** — update `version` in `package.json`, commit, and push
+   to `main`.
+1. **Trigger the workflow** — go to **Actions → Release → Run workflow** and
+   click **Run**.
+
+The workflow will automatically:
+
+- Read the version from `package.json` on the triggered branch.
+- Create the exact semver tag (e.g. `v1.2.3`) and update the floating major
+  tag (e.g. `v1`).
+- Create the `v1` branch if it doesn't exist yet, or update it for
+  minor/patch releases within the same major.
+- Publish a GitHub Release with auto-generated release notes.

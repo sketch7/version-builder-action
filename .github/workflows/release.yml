@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read version from package.json
+        id: version
+        run: |
+          VERSION="v$(jq -r '.version' package.json)"
+          MAJOR="v$(jq -r '.version' package.json | cut -d. -f1)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "major=$MAJOR"     >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION (major: $MAJOR)"
+
+      - name: Configure Git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create release tags
+        run: |
+          git tag "${{ steps.version.outputs.version }}" \
+            --annotate \
+            --message "${{ steps.version.outputs.version }} Release"
+
+          git tag "${{ steps.version.outputs.major }}" \
+            --force \
+            --annotate \
+            --message "Sync ${{ steps.version.outputs.major }} → ${{ steps.version.outputs.version }}"
+
+      - name: Push tags
+        run: |
+          git push origin "${{ steps.version.outputs.version }}"
+          git push origin "${{ steps.version.outputs.major }}" --force
+
+      - name: Create or update version branch
+        run: |
+          BRANCH="${{ steps.version.outputs.major }}"
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+            echo "Updating existing branch $BRANCH"
+            git push origin "HEAD:$BRANCH" --force
+          else
+            echo "Creating new branch $BRANCH"
+            git push origin "HEAD:refs/heads/$BRANCH"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.version }}" \
+            --title "${{ steps.version.outputs.version }}" \
+            --generate-notes
