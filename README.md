@@ -50,9 +50,9 @@ steps:
     id: version
     uses: sketch7/version-builder-action@v1
     with:
-      version: "1.5.6"           # optional — omit to read from package.json
-      preid: "dev"               # optional
-      preid-branches: "main,master,develop"  # optional
+      version: "1.5.6" # optional — omit to read from package.json
+      preid: "dev" # optional
+      preid-branches: "main,master,develop" # optional
 
   - name: Use outputs
     run: |
