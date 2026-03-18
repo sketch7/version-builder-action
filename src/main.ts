@@ -38,7 +38,7 @@ export async function run(): Promise<void> {
 	const isPreRel = resolvedPreid !== null
 	if (isPreRel) {
 		core.debug("Use preid for branch")
-		// todo: handle version with existing preid e.g. 1.0.0-rc.1 and increment the number instead of always starting from 1
+		// todo: handle version with existing preid e.g. 1.0.0-rc.0 and increment the number instead of always starting from 0
 		versionSuffix = `${resolvedPreid}${preidDelimiter}${runNumber}`
 
 		if (versionSegments.length === 3) {
