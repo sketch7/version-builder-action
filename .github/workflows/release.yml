@@ -52,7 +52,7 @@ jobs:
           BRANCH="${{ steps.version.outputs.major }}"
           if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
             echo "Updating existing branch $BRANCH"
-            git push origin "HEAD:$BRANCH" --force
+            git push origin "HEAD:refs/heads/$BRANCH" --force
           else
             echo "Creating new branch $BRANCH"
             git push origin "HEAD:refs/heads/$BRANCH"
