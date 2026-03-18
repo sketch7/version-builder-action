@@ -17,10 +17,12 @@ A **GitHub Action** (Node 24, TypeScript) that generates or modifies semantic ve
 
 ```sh
 pnpm run build          # Compile TypeScript → dist/index.js
+pnpm run build:watch    # Incremental build with file watching
 pnpm run test           # Run unit tests (single pass)
 pnpm run test:watch     # Run tests in watch mode
 pnpm run ci-test        # Run tests with v8 coverage (CI)
 pnpm run lint           # Lint src/ and __tests__/
+pnpm run format:check   # Check formatting with oxfmt
 pnpm run format:write   # Auto-format with oxfmt
 pnpm run all            # format → lint → test → build (full pre-push pipeline)
 ```
@@ -40,7 +42,7 @@ dist/index.js   — Compiled bundle (MUST be committed; referenced by action.yml
 
 - **Imports**: Named imports (`import { readFile } from "fs/promises"`); namespace imports for `@actions/*` (`import * as core from "@actions/core"`)
 - **Types**: No `any`; use strict interfaces; prefer inline object types for small shapes
-- **Tests**: Parametrized with a typed dataset array `{ name, input, expected }[]`, iterate with `test(\`given ${name}...\`)`; mock env vars via `process.env["INPUT_*"]`
+- **Tests**: Parametrized with a typed dataset array `{ name, input, expected }[]`; use `test.each(dataset)("given $name - should be $expected", ...)` with `$property` interpolation; mock env vars via `process.env["INPUT_*"]`
 - **No floating promises**: wrap top-level async calls; the `run()` in `index.ts` uses `// eslint-disable-line` for the action runtime
 
 ## Critical Notes
