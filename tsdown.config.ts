@@ -6,11 +6,11 @@ export default defineConfig({
 	target: "node24",
 	deps: {
 		alwaysBundle: [/.*/],
-		onlyBundle: false
+		onlyBundle: false,
 	},
 	minify: false,
 	sourcemap: false,
 	outDir: "dist",
 	outExtensions: () => ({ js: ".js" }),
-	clean: true
+	clean: true,
 })

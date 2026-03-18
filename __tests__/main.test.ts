@@ -13,9 +13,9 @@ describe("isPrerelease", () => {
 				branch: "master",
 				preidBranches: ["master", "develop"],
 				isForcePreid: false,
-				isForceStable: false
+				isForceStable: false,
 			},
-			expected: true
+			expected: true,
 		},
 		{
 			name: "Force preid",
@@ -23,9 +23,9 @@ describe("isPrerelease", () => {
 				branch: "ci",
 				preidBranches: ["master", "develop"],
 				isForcePreid: true,
-				isForceStable: false
+				isForceStable: false,
 			},
-			expected: true
+			expected: true,
 		},
 		{
 			name: "Force preid > force stable",
@@ -33,9 +33,9 @@ describe("isPrerelease", () => {
 				branch: "ci",
 				preidBranches: ["master", "develop"],
 				isForcePreid: true,
-				isForceStable: true
+				isForceStable: true,
 			},
-			expected: true
+			expected: true,
 		},
 		// stable
 		{
@@ -44,9 +44,9 @@ describe("isPrerelease", () => {
 				branch: "master",
 				preidBranches: ["develop"],
 				isForcePreid: false,
-				isForceStable: false
+				isForceStable: false,
 			},
-			expected: false
+			expected: false,
 		},
 		{
 			name: "Force stable",
@@ -54,10 +54,10 @@ describe("isPrerelease", () => {
 				branch: "master",
 				preidBranches: ["master"],
 				isForcePreid: false,
-				isForceStable: true
+				isForceStable: true,
 			},
-			expected: false
-		}
+			expected: false,
+		},
 	])("given $name - should be $expected", ({ input, expected }) => {
 		expect(isPrerelease(input)).toBe(expected)
 	})
@@ -78,7 +78,7 @@ test("runs", () => {
 	const np = process.execPath
 	const ip = path.join(__dirname, "..", "dist", "index.js")
 	const options: cp.ExecFileSyncOptions = {
-		env: process.env
+		env: process.env,
 	}
 	const result = cp.execFileSync(np, [ip], options).toString()
 	console.log(result)

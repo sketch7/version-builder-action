@@ -24,7 +24,7 @@ export async function run(): Promise<void> {
 	const preidBranches = preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main", "master", "develop"]
 
 	core.info(
-		`isForcePreid: ${isForcePreid}, Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`
+		`isForcePreid: ${isForcePreid}, Branch: ${branch}, ContextRef: ${github.context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`,
 	)
 
 	let versionSuffix: string | undefined
@@ -35,7 +35,7 @@ export async function run(): Promise<void> {
 		branch,
 		preidBranches,
 		isForcePreid,
-		isForceStable
+		isForceStable,
 	})
 	if (isPreRel) {
 		core.debug("Use preid for branch")
