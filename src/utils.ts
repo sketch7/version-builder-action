@@ -125,8 +125,9 @@ export function resolveTag(input: { resolvedPreid: string | null; branch: string
 }
 
 /**
- * Counts commits on HEAD since the last git commit that touched `filePath`.
- * Returns 0 if the file has never been committed, or if git is unavailable.
+ * Counts commits on HEAD since the last commit that touched `filePath`.
+ * Returns 0 when the file has never been committed, when HEAD is that commit, or if git is unavailable.
+ * e.g. if `package.json` was last changed 5 commits ago the counter is 5; bumping the version resets it to 0.
  */
 export function getCommitCountSinceFileChange(
 	filePath: string,

@@ -308,7 +308,7 @@ describe("stripPreid", () => {
 })
 
 describe("getCommitCountSinceFileChange", () => {
-	test("returns commit count when sha is found", () => {
+	test("returns commit count since file last changed", () => {
 		let call = 0
 		const execFn = () => (call++ === 0 ? "abc123def\n" : "5\n")
 		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(5)
@@ -318,7 +318,7 @@ describe("getCommitCountSinceFileChange", () => {
 		expect(getCommitCountSinceFileChange("package.json", () => "")).toBe(0)
 	})
 
-	test("returns 0 when HEAD is the file change commit (count = 0)", () => {
+	test("returns 0 when HEAD is the version bump commit (count = 0)", () => {
 		let call = 0
 		const execFn = () => (call++ === 0 ? "abc123def\n" : "0\n")
 		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(0)
