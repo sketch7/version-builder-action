@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   checks:
-    name: Checks (Format, Lint, Test)
+    name: Checks (Format, Lint, Test etc...)
     runs-on: ubuntu-latest
 
     steps:
