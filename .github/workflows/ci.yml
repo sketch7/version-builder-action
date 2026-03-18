@@ -47,9 +47,9 @@ jobs:
         id: test
         run: pnpm run ci-test
 
-      - name: Build dist/
+      - name: Build
         id: build
-        run: pnpm run bundle
+        run: pnpm run build
 
       - name: Check dist/ is up-to-date
         id: diff
