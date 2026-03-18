@@ -9,23 +9,26 @@ both semver and non-semver variants as outputs.
 
 - If the `version` input is not provided, the action reads `version` from the
   repository's `package.json`.
-- When the current branch is in the `preid-branches` list (or `force-preid` is
-  `true`), the run number is appended as a prerelease identifier:
-  `1.5.6` → `1.5.6-dev.123`
-- On all other branches (or when `force-stable` is `true`) the version is
-  emitted unchanged: `1.5.6`
-- `force-preid` takes precedence over `force-stable`.
+- The branch is checked against the following rules **in order**:
+  1. `force-stable: true` → always stable, regardless of branch.
+  2. `force-preid: true` → always pre-release, uses the mapped preid for the branch or falls back to `preid`.
+  3. Exact match in `preid-branches` → pre-release with the mapped preid (e.g. `main` → `rc`, `develop` → `dev`).
+  4. Matches a `stable-branches` regex pattern (e.g. `v1`, `1.x`) → stable.
+  5. **All other branches** → pre-release with the default `preid` (e.g. `feature/foo` → `dev`).
+- When pre-release, the run number is appended: `1.5.6` → `1.5.6-dev.123`
+- When stable, the version is emitted unchanged: `1.5.6`
 
 ## Inputs
 
-| Input                 | Required | Default                  | Description                                                                   |
-| --------------------- | -------- | ------------------------ | ----------------------------------------------------------------------------- |
-| `version`             | No       | _(reads `package.json`)_ | Base version to use (e.g. `1.5.6`).                                           |
-| `preid`               | No       | `dev`                    | Prerelease identifier to append (e.g. `dev`, `rc`).                           |
-| `preid-branches`      | No       | `main,master,develop`    | Comma-separated list of branches that trigger preid versioning.               |
-| `preid-num-delimiter` | No       | `.`                      | Delimiter between the preid and the run number (e.g. `dev.123` or `dev-123`). |
-| `force-preid`         | No       | `false`                  | Forces preid versioning regardless of the current branch.                     |
-| `force-stable`        | No       | `false`                  | Forces stable versioning regardless of the current branch.                    |
+| Input                 | Required | Default                         | Description                                                                                                                                                            |
+| --------------------- | -------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`             | No       | _(reads `package.json`)_        | Base version to use (e.g. `1.5.6`).                                                                                                                                    |
+| `preid`               | No       | `dev`                           | Default prerelease identifier used when no branch-specific mapping is defined.                                                                                         |
+| `preid-branches`      | No       | `main:rc,master:rc,develop:dev` | Comma-separated list of branches (with optional `branch:preid` mapping) that trigger preid versioning. Plain name uses the global `preid`.                             |
+| `stable-branches`     | No       | `^v\d+$,^\d+\.x$`               | Comma-separated regex patterns for branches that are always stable (e.g. `v1`, `2.x`). Any branch not in `preid-branches` and not matching here falls back to `preid`. |
+| `preid-num-delimiter` | No       | `.`                             | Delimiter between the preid and the run number (e.g. `dev.123` or `dev-123`).                                                                                          |
+| `force-preid`         | No       | `false`                         | Forces preid versioning regardless of the current branch.                                                                                                              |
+| `force-stable`        | No       | `false`                         | Forces stable versioning regardless of the current branch.                                                                                                             |
 
 ## Outputs
 
@@ -39,6 +42,18 @@ both semver and non-semver variants as outputs.
 | `preid`            | `dev`           | The preid string when pre-release, otherwise an empty string.               |
 | `isPrerelease`     | `true`          | Whether the generated version is a prerelease.                              |
 
+## Branch Behavior (defaults)
+
+| Branch            | Result                         |
+| ----------------- | ------------------------------ |
+| `main`            | `1.5.6-rc.123` (explicit map)  |
+| `master`          | `1.5.6-rc.123` (explicit map)  |
+| `develop`         | `1.5.6-dev.123` (explicit map) |
+| `feature/my-feat` | `1.5.6-dev.123` (fallback)     |
+| `workflow`        | `1.5.6-dev.123` (fallback)     |
+| `v1`, `v2`        | `1.5.6` (stable pattern)       |
+| `1.x`, `12.x`     | `1.5.6` (stable pattern)       |
+
 ## Usage
 
 ```yaml
@@ -51,14 +66,15 @@ steps:
     uses: sketch7/version-builder-action@v1
     with:
       version: "1.5.6" # optional — omit to read from package.json
-      preid: "dev" # optional
-      preid-branches: "main,master,develop" # optional
+      preid: "dev" # optional, default fallback preid
+      preid-branches: "main:rc,master:rc,develop:dev,vnext:next" # optional
+      stable-branches: "^v\\d+$,^\\d+\\.x$" # optional
 
   - name: Use outputs
     run: |
       echo "Version:          ${{ steps.version.outputs.version }}"
       echo "Non-semver:       ${{ steps.version.outputs.nonSemverVersion }}"
-      echo "Preid:              ${{ steps.version.outputs.preid }}"
+      echo "Preid:            ${{ steps.version.outputs.preid }}"
       echo "Is pre-release:   ${{ steps.version.outputs.isPrerelease }}"
 ```
 
@@ -79,6 +95,15 @@ steps:
   with:
     force-preid: "true"
     preid: "rc"
+```
+
+### Custom stable branch patterns
+
+```yaml
+- name: Build version
+  uses: sketch7/version-builder-action@v1
+  with:
+    stable-branches: "^v\\d+$,^\\d+\\.x$,^hotfix/.*$"
 ```
 
 ## Publishing a New Release
