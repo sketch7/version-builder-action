@@ -19704,7 +19704,7 @@ function resolveTag(input) {
 * Returns 0 when the file has never been committed, when HEAD is that commit, or if git is unavailable.
 * e.g. if `package.json` was last changed 5 commits ago the counter is 5; bumping the version resets it to 0.
 */
-function getCommitCount(filePath, execFn = (cmd) => (0, child_process.execSync)(cmd, { encoding: "utf8" })) {
+function getCommitCountSinceFileChange(filePath, execFn = (cmd) => (0, child_process.execSync)(cmd, { encoding: "utf8" })) {
 	try {
 		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim();
 		if (!sha) return 0;
@@ -19747,7 +19747,7 @@ async function run() {
 		"vnext:next"
 	]);
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
-	const commitCount = getCommitCount("package.json");
+	const commitCount = getCommitCountSinceFileChange("package.json");
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	let versionSuffix;
 	const versionSegments = baseVersion.split(".");
