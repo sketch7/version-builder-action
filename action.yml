@@ -23,9 +23,11 @@ inputs:
     default: "false"
   preid-branches:
     required: false
-    description: "Branches to be used for preid, as comma delimited to use for versioning
-      e.g. 'master,develop'."
-    default: "main,master,develop"
+    description: "Branches to use for preid versioning, as a comma-delimited list. Each
+      entry can be either a plain branch name (uses the global `preid` value) or
+      `branch:preid` to map a specific preid per branch e.g.
+      'main:rc,master:rc,develop:dev,vnext:next'."
+    default: "main:rc,master:rc,develop:dev"
   preid:
     required: false
     description: "Version preid to append e.g. 'dev', if not specified will read from

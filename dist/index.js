@@ -19607,8 +19607,30 @@ const context = new Context();
 function coerceArray(value) {
 	return Array.isArray(value) ? value : [value];
 }
-function isPrerelease(input) {
-	return input.isForcePreid || !input.isForceStable && input.preidBranches.includes(input.branch);
+/**
+* Parses entries in the form `"branch"` or `"branch:preid"`.
+* e.g. `["main:rc", "develop:dev", "vnext:next", "feature"]`
+*/
+function parsePreidBranches(entries) {
+	return entries.map((entry) => {
+		const colonIdx = entry.indexOf(":");
+		if (colonIdx === -1) return { branch: entry };
+		return {
+			branch: entry.slice(0, colonIdx),
+			preid: entry.slice(colonIdx + 1)
+		};
+	});
+}
+/**
+* Resolves the preid string for the current branch.
+* Returns `null` when the version should be stable.
+*/
+function resolvePreid(input) {
+	if (input.forcePreid) return input.preidBranches.find((e) => e.branch === input.branch)?.preid ?? input.defaultPreid;
+	if (input.forceStable) return null;
+	const match = input.preidBranches.find((e) => e.branch === input.branch);
+	if (!match) return null;
+	return match.preid ?? input.defaultPreid;
 }
 
 //#endregion
@@ -19617,35 +19639,37 @@ async function run() {
 	const branch = context.ref.replace("refs/heads/", "");
 	const runNumber = context.runNumber;
 	let version = getInput("version");
-	const preid = getInput("preid") || "dev";
+	const defaultPreid = getInput("preid") || "dev";
 	const preidDelimiter = getInput("preid-num-delimiter") || ".";
 	const preidBranchesInput = getInput("preid-branches");
-	const isForcePreid = getBooleanInput("force-preid");
-	const isForceStable = getBooleanInput("force-stable");
+	const forcePreid = getBooleanInput("force-preid");
+	const forceStable = getBooleanInput("force-stable");
 	if (!version) version = JSON.parse(await (0, fs_promises.readFile)("./package.json", "utf8")).version;
 	let nonSemverVersion = version;
-	const preidBranches = preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
-		"main",
-		"master",
-		"develop"
-	];
-	info(`isForcePreid: ${isForcePreid}, Branch: ${branch}, ContextRef: ${context.ref}, Version: ${version}, RunNumber: ${runNumber}, PreidBranches: ${preidBranches}`);
+	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
+		"main:rc",
+		"master:rc",
+		"develop:dev"
+	]);
+	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}`);
 	let versionSuffix;
 	const versionSegments = version.split(".");
 	const [major, minor, patch] = versionSegments;
-	const isPreRel = isPrerelease({
+	const resolvedPreid = resolvePreid({
 		branch,
 		preidBranches,
-		isForcePreid,
-		isForceStable
+		defaultPreid,
+		forcePreid,
+		forceStable
 	});
+	const isPreRel = resolvedPreid !== null;
 	if (isPreRel) {
 		debug("Use preid for branch");
-		versionSuffix = `${preid}${preidDelimiter}${runNumber}`;
+		versionSuffix = `${resolvedPreid}${preidDelimiter}${runNumber}`;
 		if (versionSegments.length === 3) nonSemverVersion = `${version}.${runNumber}`;
 	}
 	const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
-	const preidOutput = isPreRel ? preid : "";
+	const preidOutput = isPreRel ? resolvedPreid : "";
 	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`);
 	setOutput("version", buildVersion);
 	setOutput("nonSemverVersion", nonSemverVersion);
@@ -19658,10 +19682,9 @@ async function run() {
 
 //#endregion
 //#region src/index.ts
-try {
-	run();
-} catch (error) {
-	if (error instanceof Error) setFailed(error.message);
-}
+run().catch((error) => {
+	const message = error instanceof Error ? error.message : String(error ?? "Unknown error");
+	setFailed(message);
+});
 
 //#endregion
