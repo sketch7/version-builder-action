@@ -30,14 +30,14 @@ describe("isPrerelease", () => {
 			expected: true,
 		},
 		{
-			name: "Force preid > force stable",
+			name: "Force stable > force preid",
 			input: {
 				branch: "ci",
 				preidBranches: ["master", "develop"],
 				forcePreid: true,
 				forceStable: true,
 			},
-			expected: true,
+			expected: false,
 		},
 		// stable
 		{

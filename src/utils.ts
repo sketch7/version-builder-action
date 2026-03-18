@@ -3,7 +3,9 @@ export function coerceArray<T>(value: T | T[]): T[] {
 }
 
 export function isPrerelease(input: { branch: string; preidBranches: string[]; forcePreid?: boolean; forceStable?: boolean }): boolean {
-	return input.forcePreid || (!input.forceStable && input.preidBranches.includes(input.branch))
+	if (input.forceStable) return false
+	if (input.forcePreid) return true
+	return input.preidBranches.includes(input.branch)
 }
 
 export interface PreidBranchEntry {
