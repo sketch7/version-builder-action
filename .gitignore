@@ -69,5 +69,10 @@ __tests__/runner/*
 
 # IDE files
 .idea
-.vscode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/mcp.json
 *.code-workspace
