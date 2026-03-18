@@ -1,11 +1,19 @@
 import * as core from "@actions/core"
 import * as github from "@actions/github"
 import { readFile } from "fs/promises"
-import { coerceArray, parsePreidBranches, resolvePreid } from "./utils"
+import {
+	coerceArray,
+	getCommitCountSinceFileChange,
+	listRemoteBranchNames,
+	matchesBranchPattern,
+	parsePreidBranches,
+	resolvePreid,
+	resolveTag,
+	stripPreid,
+} from "./utils"
 
 export async function run(): Promise<void> {
 	const branch = github.context.ref.replace("refs/heads/", "")
-	const runNumber = github.context.runNumber
 
 	let version = core.getInput("version")
 	const defaultPreid = core.getInput("preid") || "dev"
@@ -19,43 +27,48 @@ export async function run(): Promise<void> {
 		const repoPkgJson = JSON.parse(await readFile("./package.json", "utf8"))
 		version = repoPkgJson.version
 	}
-	let nonSemverVersion = version
+	const baseVersion = stripPreid(version)
+	let nonSemverVersion = baseVersion
 
 	const preidBranches = parsePreidBranches(
 		preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main:rc", "master:rc", "develop:dev", "vnext:next"],
 	)
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"]
 
-	core.info(
-		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
-	)
-
 	let versionSuffix: string | undefined
-	const versionSegments = version.split(".")
+	const versionSegments = baseVersion.split(".")
 	const [major, minor, patch] = versionSegments
 
 	const resolvedPreid = resolvePreid({ branch, preidBranches, stableBranches, defaultPreid, forcePreid, forceStable })
 	const isPreRel = resolvedPreid !== null
+	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json") : 0
+	core.info(
+		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
+	)
+
 	if (isPreRel) {
 		core.debug("Use preid for branch")
-		// todo: handle version with existing preid e.g. 1.0.0-rc.0 and increment the number instead of always starting from 0
-		versionSuffix = `${resolvedPreid}${preidDelimiter}${runNumber}`
+		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`
 
 		if (versionSegments.length === 3) {
-			nonSemverVersion = `${version}.${runNumber}`
+			nonSemverVersion = `${baseVersion}.${commitCount}`
 		}
 	}
 
-	const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version
+	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion
 	const preidOutput = isPreRel ? resolvedPreid : ""
-	// todo: add tag output similar to preid however it considers stable branches as well e.g. v1 and v2, when v2 is latest will be latest and v1 will be v1-lts
 
-	core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`)
+	const stableBranchNames = isPreRel ? [] : listRemoteBranchNames().filter(name => matchesBranchPattern(name, stableBranches))
+	const tag = resolveTag({ resolvedPreid, branch, stableBranchNames })
+
+	core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`)
 	core.setOutput("version", buildVersion)
 	core.setOutput("nonSemverVersion", nonSemverVersion) // omits the preid and returns just numbers e.g. '1.0.0'
 	core.setOutput("majorVersion", major)
 	core.setOutput("minorVersion", minor)
 	core.setOutput("patchVersion", patch)
 	core.setOutput("preid", preidOutput)
+	core.setOutput("preidCounter", isPreRel ? commitCount : "")
 	core.setOutput("isPrerelease", isPreRel)
+	core.setOutput("tag", tag)
 }

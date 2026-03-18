@@ -32,6 +32,8 @@ let crypto = require("crypto");
 crypto = __toESM(crypto);
 let fs = require("fs");
 fs = __toESM(fs);
+let child_process = require("child_process");
+child_process = __toESM(child_process);
 let fs_promises = require("fs/promises");
 
 //#region node_modules/.pnpm/@actions+core@3.0.0/node_modules/@actions/core/lib/utils.js
@@ -19647,12 +19649,87 @@ function resolvePreid(input) {
 	if (matchesBranchPattern(input.branch, input.stableBranches)) return null;
 	return input.defaultPreid;
 }
+/**
+* Strips any pre-release suffix from a version string.
+* e.g. `"1.0.0-rc.0"` → `"1.0.0"`, `"1.0.0"` → `"1.0.0"`.
+*/
+function stripPreid(version) {
+	const idx = version.indexOf("-");
+	return idx === -1 ? version : version.slice(0, idx);
+}
+/**
+* Parses a stable branch name into a numeric version array for comparison.
+* Strips a leading `v` and treats `.x` as a terminal segment (dropped).
+* Returns `null` when no numeric version can be parsed.
+* e.g. `"v1"` → `[1]`, `"2.x"` → `[2]`, `"v3.1"` → `[3, 1]`, `"main"` → `null`.
+*/
+function parseBranchVersion(branch) {
+	let normalized = branch.startsWith("v") ? branch.slice(1) : branch;
+	normalized = normalized.replace(/\.x$/, "");
+	if (!normalized) return null;
+	const parts = normalized.split(".");
+	if (parts.some((p) => p === "" || !/^\d+$/.test(p))) return null;
+	return parts.map(Number);
+}
+function compareVersionArrays(a, b) {
+	const len = Math.max(a.length, b.length);
+	for (let i = 0; i < len; i++) {
+		const diff = (a[i] ?? 0) - (b[i] ?? 0);
+		if (diff !== 0) return diff;
+	}
+	return 0;
+}
+/**
+* Resolves the dist-tag string for the current build.
+* - Pre-release builds → returns the `resolvedPreid` value (e.g. `"rc"`, `"dev"`).
+* - Stable builds → compares the current branch against all detected stable branches;
+*   the branch with the highest semver version emits `"latest"`, all others emit `"v{major}-lts"`.
+*   Falls back to `"latest"` when no branch versions can be parsed.
+*/
+function resolveTag(input) {
+	if (input.resolvedPreid !== null) return input.resolvedPreid;
+	const versioned = input.stableBranchNames.map((name) => ({
+		name,
+		version: parseBranchVersion(name)
+	})).filter((e) => e.version !== null);
+	if (versioned.length === 0) return "latest";
+	const highest = versioned.reduce((best, cur) => compareVersionArrays(cur.version, best.version) > 0 ? cur : best);
+	const currentVersion = parseBranchVersion(input.branch);
+	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest";
+	const major = currentVersion?.[0];
+	return major !== void 0 ? `v${major}-lts` : "latest";
+}
+/**
+* Counts commits on HEAD since the last commit that touched `filePath`.
+* Returns 0 when the file has never been committed, when HEAD is that commit, or if git is unavailable.
+* e.g. if `package.json` was last changed 5 commits ago the counter is 5; bumping the version resets it to 0.
+*/
+function getCommitCountSinceFileChange(filePath, execFn = (cmd) => (0, child_process.execSync)(cmd, { encoding: "utf8" })) {
+	try {
+		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim();
+		if (!sha) return 0;
+		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim();
+		return parseInt(count, 10) || 0;
+	} catch {
+		return 0;
+	}
+}
+/**
+* Lists all remote branch names from `origin` via `git ls-remote --heads origin`.
+* Returns an empty array if git is unavailable or the remote cannot be reached.
+*/
+function listRemoteBranchNames(execFn = (cmd) => (0, child_process.execSync)(cmd, { encoding: "utf8" })) {
+	try {
+		return execFn("git ls-remote --heads origin").split("\n").map((line) => /refs\/heads\/(.+)$/.exec(line)?.[1]?.trim() ?? null).filter((name) => name !== null && name.length > 0);
+	} catch {
+		return [];
+	}
+}
 
 //#endregion
 //#region src/main.ts
 async function run() {
 	const branch = context.ref.replace("refs/heads/", "");
-	const runNumber = context.runNumber;
 	let version = getInput("version");
 	const defaultPreid = getInput("preid") || "dev";
 	const preidDelimiter = getInput("preid-num-delimiter") || ".";
@@ -19661,7 +19738,8 @@ async function run() {
 	const forcePreid = getBooleanInput("force-preid");
 	const forceStable = getBooleanInput("force-stable");
 	if (!version) version = JSON.parse(await (0, fs_promises.readFile)("./package.json", "utf8")).version;
-	let nonSemverVersion = version;
+	const baseVersion = stripPreid(version);
+	let nonSemverVersion = baseVersion;
 	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
 		"main:rc",
 		"master:rc",
@@ -19669,9 +19747,8 @@ async function run() {
 		"vnext:next"
 	]);
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
-	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	let versionSuffix;
-	const versionSegments = version.split(".");
+	const versionSegments = baseVersion.split(".");
 	const [major, minor, patch] = versionSegments;
 	const resolvedPreid = resolvePreid({
 		branch,
@@ -19682,21 +19759,30 @@ async function run() {
 		forceStable
 	});
 	const isPreRel = resolvedPreid !== null;
+	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json") : 0;
+	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	if (isPreRel) {
 		debug("Use preid for branch");
-		versionSuffix = `${resolvedPreid}${preidDelimiter}${runNumber}`;
-		if (versionSegments.length === 3) nonSemverVersion = `${version}.${runNumber}`;
+		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`;
+		if (versionSegments.length === 3) nonSemverVersion = `${baseVersion}.${commitCount}`;
 	}
-	const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
+	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
 	const preidOutput = isPreRel ? resolvedPreid : "";
-	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`);
+	const tag = resolveTag({
+		resolvedPreid,
+		branch,
+		stableBranchNames: isPreRel ? [] : listRemoteBranchNames().filter((name) => matchesBranchPattern(name, stableBranches))
+	});
+	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);
 	setOutput("nonSemverVersion", nonSemverVersion);
 	setOutput("majorVersion", major);
 	setOutput("minorVersion", minor);
 	setOutput("patchVersion", patch);
 	setOutput("preid", preidOutput);
+	setOutput("preidCounter", isPreRel ? commitCount : "");
 	setOutput("isPrerelease", isPreRel);
+	setOutput("tag", tag);
 }
 
 //#endregion
