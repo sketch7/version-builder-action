@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest"
 import { isPrerelease } from "../src/utils"
 
 describe("isPrerelease", () => {
-	const dataset = [
+	test.each([
 		// prerelease
 		{
 			name: "Preid branch match",
@@ -58,13 +58,9 @@ describe("isPrerelease", () => {
 			},
 			expected: false
 		}
-	]
-
-	for (const { name, input, expected } of dataset) {
-		test(`given ${name} (${JSON.stringify(input)}) should be ${expected}`, () => {
-			expect(isPrerelease(input)).toBe(expected)
-		})
-	}
+	])("given $name - should be $expected", ({ input, expected }) => {
+		expect(isPrerelease(input)).toBe(expected)
+	})
 })
 
 // shows how the runner will run a javascript action with env / stdout protocol
