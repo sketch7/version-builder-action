@@ -2,7 +2,9 @@ import * as cp from "child_process"
 import * as path from "path"
 import * as process from "process"
 import { describe, expect, test } from "vitest"
-import { isPrerelease, parsePreidBranches, resolvePreid } from "../src/utils"
+import { isPrerelease, matchesBranchPattern, parsePreidBranches, resolvePreid } from "../src/utils"
+
+const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"]
 
 describe("isPrerelease", () => {
 	test.each([
@@ -12,8 +14,8 @@ describe("isPrerelease", () => {
 			input: {
 				branch: "master",
 				preidBranches: ["master", "develop"],
-				isForcePreid: false,
-				isForceStable: false,
+				forcePreid: false,
+				forceStable: false,
 			},
 			expected: true,
 		},
@@ -22,8 +24,8 @@ describe("isPrerelease", () => {
 			input: {
 				branch: "ci",
 				preidBranches: ["master", "develop"],
-				isForcePreid: true,
-				isForceStable: false,
+				forcePreid: true,
+				forceStable: false,
 			},
 			expected: true,
 		},
@@ -32,8 +34,8 @@ describe("isPrerelease", () => {
 			input: {
 				branch: "ci",
 				preidBranches: ["master", "develop"],
-				isForcePreid: true,
-				isForceStable: true,
+				forcePreid: true,
+				forceStable: true,
 			},
 			expected: true,
 		},
@@ -43,8 +45,8 @@ describe("isPrerelease", () => {
 			input: {
 				branch: "master",
 				preidBranches: ["develop"],
-				isForcePreid: false,
-				isForceStable: false,
+				forcePreid: false,
+				forceStable: false,
 			},
 			expected: false,
 		},
@@ -53,8 +55,8 @@ describe("isPrerelease", () => {
 			input: {
 				branch: "master",
 				preidBranches: ["master"],
-				isForcePreid: false,
-				isForceStable: true,
+				forcePreid: false,
+				forceStable: true,
 			},
 			expected: false,
 		},
@@ -90,71 +92,144 @@ describe("parsePreidBranches", () => {
 	})
 })
 
+describe("matchesBranchPattern", () => {
+	test.each([
+		{ name: "v1 matches ^v\\d+$", branch: "v1", patterns: ["^v\\d+$"], expected: true },
+		{ name: "v12 matches ^v\\d+$", branch: "v12", patterns: ["^v\\d+$"], expected: true },
+		{ name: "1.x matches ^\\d+\\.x$", branch: "1.x", patterns: ["^\\d+\\.x$"], expected: true },
+		{ name: "12.x matches ^\\d+\\.x$", branch: "12.x", patterns: ["^\\d+\\.x$"], expected: true },
+		{ name: "main does not match stable patterns", branch: "main", patterns: DEFAULT_STABLE_BRANCHES, expected: false },
+		{ name: "feature/foo does not match stable patterns", branch: "feature/foo", patterns: DEFAULT_STABLE_BRANCHES, expected: false },
+		{ name: "v1-beta does not match ^v\\d+$", branch: "v1-beta", patterns: ["^v\\d+$"], expected: false },
+		{ name: "empty patterns always false", branch: "main", patterns: [], expected: false },
+	])("given $name - should be $expected", ({ branch, patterns, expected }) => {
+		expect(matchesBranchPattern(branch, patterns)).toBe(expected)
+	})
+})
+
 describe("resolvePreid", () => {
 	test.each([
+		// --- explicit preid-branch matches ---
 		{
-			name: "main returns rc",
+			name: "main returns rc (explicit map)",
 			input: {
 				branch: "main",
 				preidBranches: parsePreidBranches(["main:rc", "master:rc", "develop:dev", "vnext:next"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "dev",
-				isForcePreid: false,
-				isForceStable: false,
+				forcePreid: false,
+				forceStable: false,
 			},
 			expected: "rc",
 		},
 		{
-			name: "develop returns dev",
+			name: "develop returns dev (explicit map)",
 			input: {
 				branch: "develop",
 				preidBranches: parsePreidBranches(["main:rc", "master:rc", "develop:dev", "vnext:next"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "dev",
-				isForcePreid: false,
-				isForceStable: false,
+				forcePreid: false,
+				forceStable: false,
 			},
 			expected: "dev",
 		},
 		{
-			name: "vnext returns next",
+			name: "vnext returns next (explicit map)",
 			input: {
 				branch: "vnext",
 				preidBranches: parsePreidBranches(["main:rc", "master:rc", "develop:dev", "vnext:next"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "dev",
-				isForcePreid: false,
-				isForceStable: false,
+				forcePreid: false,
+				forceStable: false,
 			},
 			expected: "next",
-		},
-		{
-			name: "unmatched branch returns null (stable)",
-			input: {
-				branch: "feature/my-feat",
-				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
-				defaultPreid: "dev",
-				isForcePreid: false,
-				isForceStable: false,
-			},
-			expected: null,
 		},
 		{
 			name: "plain branch entry uses defaultPreid",
 			input: {
 				branch: "develop",
 				preidBranches: parsePreidBranches(["main:rc", "develop"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "alpha",
-				isForcePreid: false,
-				isForceStable: false,
+				forcePreid: false,
+				forceStable: false,
 			},
 			expected: "alpha",
 		},
+		// --- stable branch patterns ---
+		{
+			name: "v1 matches stable pattern returns null",
+			input: {
+				branch: "v1",
+				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
+				defaultPreid: "dev",
+				forcePreid: false,
+				forceStable: false,
+			},
+			expected: null,
+		},
+		{
+			name: "2.x matches stable pattern returns null",
+			input: {
+				branch: "2.x",
+				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
+				defaultPreid: "dev",
+				forcePreid: false,
+				forceStable: false,
+			},
+			expected: null,
+		},
+		{
+			name: "custom stable pattern hotfix/* returns null",
+			input: {
+				branch: "hotfix/1.0",
+				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: ["^hotfix/.*$"],
+				defaultPreid: "dev",
+				forcePreid: false,
+				forceStable: false,
+			},
+			expected: null,
+		},
+		// --- fallback default preid ---
+		{
+			name: "unmatched branch falls back to defaultPreid",
+			input: {
+				branch: "feature/my-feat",
+				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
+				defaultPreid: "dev",
+				forcePreid: false,
+				forceStable: false,
+			},
+			expected: "dev",
+		},
+		{
+			name: "workflow branch falls back to defaultPreid",
+			input: {
+				branch: "workflow",
+				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
+				defaultPreid: "dev",
+				forcePreid: false,
+				forceStable: false,
+			},
+			expected: "dev",
+		},
+		// --- force flags ---
 		{
 			name: "force-preid on unmatched branch uses defaultPreid",
 			input: {
 				branch: "hotfix/123",
 				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "dev",
-				isForcePreid: true,
-				isForceStable: false,
+				forcePreid: true,
+				forceStable: false,
 			},
 			expected: "dev",
 		},
@@ -163,33 +238,48 @@ describe("resolvePreid", () => {
 			input: {
 				branch: "main",
 				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "dev",
-				isForcePreid: true,
-				isForceStable: false,
+				forcePreid: true,
+				forceStable: false,
 			},
 			expected: "rc",
 		},
 		{
-			name: "force-stable returns null",
+			name: "force-preid overrides stable pattern",
+			input: {
+				branch: "v1",
+				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
+				defaultPreid: "dev",
+				forcePreid: true,
+				forceStable: false,
+			},
+			expected: "dev",
+		},
+		{
+			name: "force-stable returns null even for preid branch",
 			input: {
 				branch: "main",
 				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "dev",
-				isForcePreid: false,
-				isForceStable: true,
+				forcePreid: false,
+				forceStable: true,
 			},
 			expected: null,
 		},
 		{
-			name: "force-preid wins over force-stable",
+			name: "force-stable wins over force-preid",
 			input: {
 				branch: "main",
 				preidBranches: parsePreidBranches(["main:rc", "develop:dev"]),
+				stableBranches: DEFAULT_STABLE_BRANCHES,
 				defaultPreid: "dev",
-				isForcePreid: true,
-				isForceStable: true,
+				forcePreid: true,
+				forceStable: true,
 			},
-			expected: "rc",
+			expected: null,
 		},
 	])("given $name - should return $expected", ({ input, expected }) => {
 		expect(resolvePreid(input)).toBe(expected)
@@ -199,14 +289,15 @@ describe("resolvePreid", () => {
 // shows how the runner will run a javascript action with env / stdout protocol
 test("runs", () => {
 	// inputs
-	process.env["INPUT_PREID-BRANCHES"] = "main:rc,master:rc,develop:dev,feature/resusable-workflow:dev"
+	process.env["INPUT_PREID-BRANCHES"] = "main:rc,master:rc,develop:dev"
+	process.env["INPUT_STABLE-BRANCHES"] = "^v\\d+$,^\\d+\\.x$"
 	process.env["INPUT_VERSION"] = "4.0.1"
-	process.env["INPUT_PREID"] = "rc"
+	process.env["INPUT_PREID"] = "dev"
 	process.env["INPUT_FORCE-PREID"] = "false"
 	process.env["INPUT_FORCE-STABLE"] = "false"
 	// envs
 	process.env["GITHUB_RUN_NUMBER"] = "23"
-	process.env["GITHUB_REF"] = "master"
+	process.env["GITHUB_REF"] = "refs/heads/feature/my-workflow"
 	const np = process.execPath
 	const ip = path.join(__dirname, "..", "dist", "index.js")
 	const options: cp.ExecFileSyncOptions = {

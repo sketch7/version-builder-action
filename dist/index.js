@@ -19622,15 +19622,29 @@ function parsePreidBranches(entries) {
 	});
 }
 /**
+* Returns true when the branch matches any of the given regex patterns (full string test).
+*/
+function matchesBranchPattern(branch, patterns) {
+	return patterns.some((pattern) => new RegExp(pattern).test(branch));
+}
+/**
 * Resolves the preid string for the current branch.
 * Returns `null` when the version should be stable.
+*
+* Resolution order:
+* 1. `forceStable`      → stable (null)
+* 2. `forcePreid`       → mapped preid or `defaultPreid`
+* 3. Exact match in `preidBranches` → mapped preid or `defaultPreid`
+* 4. Matches a `stableBranches` pattern → stable (null)
+* 5. Fallback → `defaultPreid` (any other branch is treated as pre-release)
 */
 function resolvePreid(input) {
-	if (input.forcePreid) return input.preidBranches.find((e) => e.branch === input.branch)?.preid ?? input.defaultPreid;
 	if (input.forceStable) return null;
+	if (input.forcePreid) return input.preidBranches.find((e) => e.branch === input.branch)?.preid ?? input.defaultPreid;
 	const match = input.preidBranches.find((e) => e.branch === input.branch);
-	if (!match) return null;
-	return match.preid ?? input.defaultPreid;
+	if (match) return match.preid ?? input.defaultPreid;
+	if (matchesBranchPattern(input.branch, input.stableBranches)) return null;
+	return input.defaultPreid;
 }
 
 //#endregion
@@ -19642,6 +19656,7 @@ async function run() {
 	const defaultPreid = getInput("preid") || "dev";
 	const preidDelimiter = getInput("preid-num-delimiter") || ".";
 	const preidBranchesInput = getInput("preid-branches");
+	const stableBranchesInput = getInput("stable-branches");
 	const forcePreid = getBooleanInput("force-preid");
 	const forceStable = getBooleanInput("force-stable");
 	if (!version) version = JSON.parse(await (0, fs_promises.readFile)("./package.json", "utf8")).version;
@@ -19651,13 +19666,15 @@ async function run() {
 		"master:rc",
 		"develop:dev"
 	]);
-	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}`);
+	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
+	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	let versionSuffix;
 	const versionSegments = version.split(".");
 	const [major, minor, patch] = versionSegments;
 	const resolvedPreid = resolvePreid({
 		branch,
 		preidBranches,
+		stableBranches,
 		defaultPreid,
 		forcePreid,
 		forceStable

@@ -28,6 +28,13 @@ inputs:
       `branch:preid` to map a specific preid per branch e.g.
       'main:rc,master:rc,develop:dev,vnext:next'."
     default: "main:rc,master:rc,develop:dev"
+  stable-branches:
+    required: false
+    description: "Regex patterns (comma-delimited) matching stable branches that should
+      never receive a preid. Any branch not in `preid-branches` and not matching
+      one of these patterns will fall back to the default `preid`.
+      e.g. '^v\\d+$,^\\d+\\.x$' matches 'v1', 'v2', '1.x', '2.x'."
+    default: '^v\d+$,^\d+\.x$'
   preid:
     required: false
     description: "Version preid to append e.g. 'dev', if not specified will read from
