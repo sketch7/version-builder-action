@@ -19645,14 +19645,14 @@ async function run() {
 		if (versionSegments.length === 3) nonSemverVersion = `${version}.${runNumber}`;
 	}
 	const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
-	const tag = isPreRel ? preid : "";
+	const preidOutput = isPreRel ? preid : "";
 	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`);
 	setOutput("version", buildVersion);
 	setOutput("nonSemverVersion", nonSemverVersion);
 	setOutput("majorVersion", major);
 	setOutput("minorVersion", minor);
 	setOutput("patchVersion", patch);
-	setOutput("tag", tag);
+	setOutput("preid", preidOutput);
 	setOutput("isPrerelease", isPreRel);
 }
 
