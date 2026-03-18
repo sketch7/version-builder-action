@@ -59,6 +59,8 @@ outputs:
     description: "Returns the patch version e.g. '6'"
   preid:
     description: "Returns the preid e.g. 'dev' based on preid, when isPrerelease else empty string."
+  preidCounter:
+    description: "Returns the preid counter number e.g. '2' for '-rc.2', when isPrerelease else empty string."
   isPrerelease:
     description: "Returns whether the version is a prerelease version e.g. 'true' or
       'false'."

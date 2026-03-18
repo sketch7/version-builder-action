@@ -68,6 +68,7 @@ export async function run(): Promise<void> {
 	core.setOutput("minorVersion", minor)
 	core.setOutput("patchVersion", patch)
 	core.setOutput("preid", preidOutput)
+	core.setOutput("preidCounter", isPreRel ? commitCount : "")
 	core.setOutput("isPrerelease", isPreRel)
 	core.setOutput("tag", tag)
 }

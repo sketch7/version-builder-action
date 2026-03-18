@@ -19779,6 +19779,7 @@ async function run() {
 	setOutput("minorVersion", minor);
 	setOutput("patchVersion", patch);
 	setOutput("preid", preidOutput);
+	setOutput("preidCounter", isPreRel ? commitCount : "");
 	setOutput("isPrerelease", isPreRel);
 	setOutput("tag", tag);
 }
