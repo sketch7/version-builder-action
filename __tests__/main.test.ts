@@ -2,7 +2,15 @@ import * as cp from "child_process"
 import * as path from "path"
 import * as process from "process"
 import { describe, expect, test } from "vitest"
-import { isPrerelease, matchesBranchPattern, parsePreidBranches, resolvePreid } from "../src/utils"
+import {
+	isPrerelease,
+	matchesBranchPattern,
+	parsePreidBranches,
+	parseBranchVersion,
+	resolvePreid,
+	resolveTag,
+	stripPreid,
+} from "../src/utils"
 
 const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"]
 
@@ -283,6 +291,87 @@ describe("resolvePreid", () => {
 		},
 	])("given $name - should return $expected", ({ input, expected }) => {
 		expect(resolvePreid(input)).toBe(expected)
+	})
+})
+
+describe("stripPreid", () => {
+	test.each([
+		{ name: "no preid — unchanged", version: "1.0.0", expected: "1.0.0" },
+		{ name: "rc.0 suffix stripped", version: "1.0.0-rc.0", expected: "1.0.0" },
+		{ name: "next.99 suffix stripped", version: "2.3.4-next.99", expected: "2.3.4" },
+		{ name: "dev suffix stripped", version: "0.1.2-dev.7", expected: "0.1.2" },
+	])("given $name - should be $expected", ({ version, expected }) => {
+		expect(stripPreid(version)).toBe(expected)
+	})
+})
+
+describe("parseBranchVersion", () => {
+	test.each([
+		{ name: "v1", branch: "v1", expected: [1] },
+		{ name: "v2", branch: "v2", expected: [2] },
+		{ name: "1.x", branch: "1.x", expected: [1] },
+		{ name: "12.x", branch: "12.x", expected: [12] },
+		{ name: "v3.1", branch: "v3.1", expected: [3, 1] },
+		{ name: "2.3", branch: "2.3", expected: [2, 3] },
+		{ name: "main returns null", branch: "main", expected: null },
+		{ name: "feature/foo returns null", branch: "feature/foo", expected: null },
+		{ name: "develop returns null", branch: "develop", expected: null },
+	])("given $name - should be $expected", ({ branch, expected }) => {
+		expect(parseBranchVersion(branch)).toEqual(expected)
+	})
+})
+
+describe("resolveTag", () => {
+	test.each([
+		// --- pre-release → returns preid ---
+		{
+			name: "pre-release branch returns preid rc",
+			input: { resolvedPreid: "rc", branch: "main", stableBranchNames: [] },
+			expected: "rc",
+		},
+		{
+			name: "pre-release branch returns preid dev",
+			input: { resolvedPreid: "dev", branch: "feature/foo", stableBranchNames: [] },
+			expected: "dev",
+		},
+		// --- stable → latest detection ---
+		{
+			name: "single stable branch returns latest",
+			input: { resolvedPreid: null, branch: "v2", stableBranchNames: ["v2"] },
+			expected: "latest",
+		},
+		{
+			name: "highest of multiple stable branches returns latest",
+			input: { resolvedPreid: null, branch: "v2", stableBranchNames: ["v1", "v2"] },
+			expected: "latest",
+		},
+		{
+			name: "lower stable branch returns branch-lts",
+			input: { resolvedPreid: null, branch: "v1", stableBranchNames: ["v1", "v2"] },
+			expected: "v1-lts",
+		},
+		{
+			name: "1.x style — highest returns latest",
+			input: { resolvedPreid: null, branch: "2.x", stableBranchNames: ["1.x", "2.x"] },
+			expected: "latest",
+		},
+		{
+			name: "1.x style — lower returns branch-lts",
+			input: { resolvedPreid: null, branch: "1.x", stableBranchNames: ["1.x", "2.x"] },
+			expected: "1.x-lts",
+		},
+		{
+			name: "no parseable branch names falls back to latest",
+			input: { resolvedPreid: null, branch: "hotfix/1.0", stableBranchNames: [] },
+			expected: "latest",
+		},
+		{
+			name: "single un-parseable stable branch falls back to latest",
+			input: { resolvedPreid: null, branch: "hotfix/1.0", stableBranchNames: ["hotfix/1.0"] },
+			expected: "latest",
+		},
+	])("given $name - should be $expected", ({ input, expected }) => {
+		expect(resolveTag(input)).toBe(expected)
 	})
 })
 

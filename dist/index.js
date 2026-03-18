@@ -17169,6 +17169,11 @@ var __awaiter = void 0 && (void 0).__awaiter || function(thisArg, _arguments, P,
 		step((generator = generator.apply(thisArg, _arguments || [])).next());
 	});
 };
+function getAuthString(token, options) {
+	if (!token && !options.auth) throw new Error("Parameter token or opts.auth is required");
+	else if (token && options.auth) throw new Error("Parameters token and opts.auth may not both be specified");
+	return typeof options.auth === "string" ? options.auth : `token ${token}`;
+}
 function getProxyAgent(destinationUrl) {
 	return new import_lib.HttpClient().getAgent(destinationUrl);
 }
@@ -19597,10 +19602,31 @@ const defaults = {
 	}
 };
 const GitHub = Octokit.plugin(restEndpointMethods, paginateRest).defaults(defaults);
+/**
+* Convience function to correctly format Octokit Options to pass into the constructor.
+*
+* @param     token    the repo PAT or GITHUB_TOKEN
+* @param     options  other options to set
+*/
+function getOctokitOptions(token, options) {
+	const opts = Object.assign({}, options || {});
+	const auth = getAuthString(token, opts);
+	if (auth) opts.auth = auth;
+	return opts;
+}
 
 //#endregion
 //#region node_modules/.pnpm/@actions+github@9.0.0/node_modules/@actions/github/lib/github.js
 const context = new Context();
+/**
+* Returns a hydrated octokit ready to use for GitHub Actions
+*
+* @param     token    the repo PAT or GITHUB_TOKEN
+* @param     options  other options to set
+*/
+function getOctokit(token, options, ...additionalPlugins) {
+	return new (GitHub.plugin(...additionalPlugins))(getOctokitOptions(token, options));
+}
 
 //#endregion
 //#region src/utils.ts
@@ -19647,6 +19673,55 @@ function resolvePreid(input) {
 	if (matchesBranchPattern(input.branch, input.stableBranches)) return null;
 	return input.defaultPreid;
 }
+/**
+* Strips any pre-release suffix from a version string.
+* e.g. `"1.0.0-rc.0"` → `"1.0.0"`, `"1.0.0"` → `"1.0.0"`.
+*/
+function stripPreid(version) {
+	const idx = version.indexOf("-");
+	return idx === -1 ? version : version.slice(0, idx);
+}
+/**
+* Parses a stable branch name into a numeric version array for comparison.
+* Strips a leading `v` and treats `.x` as a terminal segment (dropped).
+* Returns `null` when no numeric version can be parsed.
+* e.g. `"v1"` → `[1]`, `"2.x"` → `[2]`, `"v3.1"` → `[3, 1]`, `"main"` → `null`.
+*/
+function parseBranchVersion(branch) {
+	let normalized = branch.startsWith("v") ? branch.slice(1) : branch;
+	normalized = normalized.replace(/\.x$/, "");
+	if (!normalized) return null;
+	const parts = normalized.split(".").map(Number);
+	if (parts.some(isNaN)) return null;
+	return parts;
+}
+function compareVersionArrays(a, b) {
+	const len = Math.max(a.length, b.length);
+	for (let i = 0; i < len; i++) {
+		const diff = (a[i] ?? 0) - (b[i] ?? 0);
+		if (diff !== 0) return diff;
+	}
+	return 0;
+}
+/**
+* Resolves the dist-tag string for the current build.
+* - Pre-release builds → returns the `resolvedPreid` value (e.g. `"rc"`, `"dev"`).
+* - Stable builds → compares the current branch against all detected stable branches;
+*   the branch with the highest semver version emits `"latest"`, all others emit `"<branch>-lts"`.
+*   Falls back to `"latest"` when no branch versions can be parsed.
+*/
+function resolveTag(input) {
+	if (input.resolvedPreid !== null) return input.resolvedPreid;
+	const versioned = input.stableBranchNames.map((name) => ({
+		name,
+		version: parseBranchVersion(name)
+	})).filter((e) => e.version !== null);
+	if (versioned.length === 0) return "latest";
+	const highest = versioned.reduce((best, cur) => compareVersionArrays(cur.version, best.version) > 0 ? cur : best);
+	const currentVersion = parseBranchVersion(input.branch);
+	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest";
+	return `${input.branch}-lts`;
+}
 
 //#endregion
 //#region src/main.ts
@@ -19660,8 +19735,10 @@ async function run() {
 	const stableBranchesInput = getInput("stable-branches");
 	const forcePreid = getBooleanInput("force-preid");
 	const forceStable = getBooleanInput("force-stable");
+	const token = getInput("token");
 	if (!version) version = JSON.parse(await (0, fs_promises.readFile)("./package.json", "utf8")).version;
-	let nonSemverVersion = version;
+	const baseVersion = stripPreid(version);
+	let nonSemverVersion = baseVersion;
 	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
 		"main:rc",
 		"master:rc",
@@ -19671,7 +19748,7 @@ async function run() {
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	let versionSuffix;
-	const versionSegments = version.split(".");
+	const versionSegments = baseVersion.split(".");
 	const [major, minor, patch] = versionSegments;
 	const resolvedPreid = resolvePreid({
 		branch,
@@ -19685,11 +19762,25 @@ async function run() {
 	if (isPreRel) {
 		debug("Use preid for branch");
 		versionSuffix = `${resolvedPreid}${preidDelimiter}${runNumber}`;
-		if (versionSegments.length === 3) nonSemverVersion = `${version}.${runNumber}`;
+		if (versionSegments.length === 3) nonSemverVersion = `${baseVersion}.${runNumber}`;
 	}
-	const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version;
+	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : version;
 	const preidOutput = isPreRel ? resolvedPreid : "";
-	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`);
+	let stableBranchNames = [];
+	if (!isPreRel && token) {
+		const octokit = getOctokit(token);
+		for await (const response of octokit.paginate.iterator(octokit.rest.repos.listBranches, {
+			owner: context.repo.owner,
+			repo: context.repo.repo,
+			per_page: 100
+		})) for (const b of response.data) if (matchesBranchPattern(b.name, stableBranches)) stableBranchNames.push(b.name);
+	}
+	const tag = resolveTag({
+		resolvedPreid,
+		branch,
+		stableBranchNames
+	});
+	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);
 	setOutput("nonSemverVersion", nonSemverVersion);
 	setOutput("majorVersion", major);
@@ -19697,6 +19788,7 @@ async function run() {
 	setOutput("patchVersion", patch);
 	setOutput("preid", preidOutput);
 	setOutput("isPrerelease", isPreRel);
+	setOutput("tag", tag);
 }
 
 //#endregion

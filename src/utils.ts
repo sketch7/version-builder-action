@@ -65,3 +65,58 @@ export function resolvePreid(input: {
 	if (matchesBranchPattern(input.branch, input.stableBranches)) return null
 	return input.defaultPreid
 }
+
+/**
+ * Strips any pre-release suffix from a version string.
+ * e.g. `"1.0.0-rc.0"` → `"1.0.0"`, `"1.0.0"` → `"1.0.0"`.
+ */
+export function stripPreid(version: string): string {
+	const idx = version.indexOf("-")
+	return idx === -1 ? version : version.slice(0, idx)
+}
+
+/**
+ * Parses a stable branch name into a numeric version array for comparison.
+ * Strips a leading `v` and treats `.x` as a terminal segment (dropped).
+ * Returns `null` when no numeric version can be parsed.
+ * e.g. `"v1"` → `[1]`, `"2.x"` → `[2]`, `"v3.1"` → `[3, 1]`, `"main"` → `null`.
+ */
+export function parseBranchVersion(branch: string): number[] | null {
+	let normalized = branch.startsWith("v") ? branch.slice(1) : branch
+	normalized = normalized.replace(/\.x$/, "")
+	if (!normalized) return null
+	const parts = normalized.split(".").map(Number)
+	if (parts.some(isNaN)) return null
+	return parts
+}
+
+function compareVersionArrays(a: number[], b: number[]): number {
+	const len = Math.max(a.length, b.length)
+	for (let i = 0; i < len; i++) {
+		const diff = (a[i] ?? 0) - (b[i] ?? 0)
+		if (diff !== 0) return diff
+	}
+	return 0
+}
+
+/**
+ * Resolves the dist-tag string for the current build.
+ * - Pre-release builds → returns the `resolvedPreid` value (e.g. `"rc"`, `"dev"`).
+ * - Stable builds → compares the current branch against all detected stable branches;
+ *   the branch with the highest semver version emits `"latest"`, all others emit `"<branch>-lts"`.
+ *   Falls back to `"latest"` when no branch versions can be parsed.
+ */
+export function resolveTag(input: { resolvedPreid: string | null; branch: string; stableBranchNames: string[] }): string {
+	if (input.resolvedPreid !== null) return input.resolvedPreid
+
+	const versioned = input.stableBranchNames
+		.map(name => ({ name, version: parseBranchVersion(name) }))
+		.filter((e): e is { name: string; version: number[] } => e.version !== null)
+
+	if (versioned.length === 0) return "latest"
+
+	const highest = versioned.reduce((best, cur) => (compareVersionArrays(cur.version, best.version) > 0 ? cur : best))
+	const currentVersion = parseBranchVersion(input.branch)
+	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest"
+	return `${input.branch}-lts`
+}
