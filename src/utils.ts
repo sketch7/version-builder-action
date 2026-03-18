@@ -87,9 +87,9 @@ export function parseBranchVersion(branch: string): number[] | null {
 	let normalized = branch.startsWith("v") ? branch.slice(1) : branch
 	normalized = normalized.replace(/\.x$/, "")
 	if (!normalized) return null
-	const parts = normalized.split(".").map(Number)
-	if (parts.some(isNaN)) return null
-	return parts
+	const parts = normalized.split(".")
+	if (parts.some(p => p === "" || !/^\d+$/.test(p))) return null
+	return parts.map(Number)
 }
 
 function compareVersionArrays(a: number[], b: number[]): number {
@@ -120,7 +120,7 @@ export function resolveTag(input: { resolvedPreid: string | null; branch: string
 	const highest = versioned.reduce((best, cur) => (compareVersionArrays(cur.version, best.version) > 0 ? cur : best))
 	const currentVersion = parseBranchVersion(input.branch)
 	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest"
-	const major = currentVersion?.[0] ?? parseBranchVersion(input.branch)?.[0]
+	const major = currentVersion?.[0]
 	return major !== undefined ? `v${major}-lts` : "latest"
 }
 

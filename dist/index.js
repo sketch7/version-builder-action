@@ -19667,9 +19667,9 @@ function parseBranchVersion(branch) {
 	let normalized = branch.startsWith("v") ? branch.slice(1) : branch;
 	normalized = normalized.replace(/\.x$/, "");
 	if (!normalized) return null;
-	const parts = normalized.split(".").map(Number);
-	if (parts.some(isNaN)) return null;
-	return parts;
+	const parts = normalized.split(".");
+	if (parts.some((p) => p === "" || !/^\d+$/.test(p))) return null;
+	return parts.map(Number);
 }
 function compareVersionArrays(a, b) {
 	const len = Math.max(a.length, b.length);
@@ -19696,7 +19696,7 @@ function resolveTag(input) {
 	const highest = versioned.reduce((best, cur) => compareVersionArrays(cur.version, best.version) > 0 ? cur : best);
 	const currentVersion = parseBranchVersion(input.branch);
 	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest";
-	const major = currentVersion?.[0] ?? parseBranchVersion(input.branch)?.[0];
+	const major = currentVersion?.[0];
 	return major !== void 0 ? `v${major}-lts` : "latest";
 }
 /**
@@ -19747,8 +19747,6 @@ async function run() {
 		"vnext:next"
 	]);
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
-	const commitCount = getCommitCountSinceFileChange("package.json");
-	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	let versionSuffix;
 	const versionSegments = baseVersion.split(".");
 	const [major, minor, patch] = versionSegments;
@@ -19761,17 +19759,19 @@ async function run() {
 		forceStable
 	});
 	const isPreRel = resolvedPreid !== null;
+	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json") : 0;
+	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	if (isPreRel) {
 		debug("Use preid for branch");
 		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`;
 		if (versionSegments.length === 3) nonSemverVersion = `${baseVersion}.${commitCount}`;
 	}
-	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : version;
+	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
 	const preidOutput = isPreRel ? resolvedPreid : "";
 	const tag = resolveTag({
 		resolvedPreid,
 		branch,
-		stableBranchNames: listRemoteBranchNames().filter((name) => matchesBranchPattern(name, stableBranches))
+		stableBranchNames: isPreRel ? [] : listRemoteBranchNames().filter((name) => matchesBranchPattern(name, stableBranches))
 	});
 	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);

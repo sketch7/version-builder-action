@@ -35,17 +35,17 @@ export async function run(): Promise<void> {
 	)
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"]
 
-	const commitCount = getCommitCountSinceFileChange("package.json")
-	core.info(
-		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
-	)
-
 	let versionSuffix: string | undefined
 	const versionSegments = baseVersion.split(".")
 	const [major, minor, patch] = versionSegments
 
 	const resolvedPreid = resolvePreid({ branch, preidBranches, stableBranches, defaultPreid, forcePreid, forceStable })
 	const isPreRel = resolvedPreid !== null
+	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json") : 0
+	core.info(
+		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
+	)
+
 	if (isPreRel) {
 		core.debug("Use preid for branch")
 		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`
@@ -55,10 +55,10 @@ export async function run(): Promise<void> {
 		}
 	}
 
-	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : version
+	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion
 	const preidOutput = isPreRel ? resolvedPreid : ""
 
-	const stableBranchNames = listRemoteBranchNames().filter(name => matchesBranchPattern(name, stableBranches))
+	const stableBranchNames = isPreRel ? [] : listRemoteBranchNames().filter(name => matchesBranchPattern(name, stableBranches))
 	const tag = resolveTag({ resolvedPreid, branch, stableBranchNames })
 
 	core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`)
