@@ -48,7 +48,7 @@ export async function run(): Promise<void> {
 	// todo: hotfix branches
 
 	const buildVersion = versionSuffix ? `${version}-${versionSuffix}` : version
-	const tag = isPreRel ? preid : ""
+	const preidOutput = isPreRel ? preid : ""
 
 	core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}`)
 	core.setOutput("version", buildVersion)
@@ -56,6 +56,6 @@ export async function run(): Promise<void> {
 	core.setOutput("majorVersion", major)
 	core.setOutput("minorVersion", minor)
 	core.setOutput("patchVersion", patch)
-	core.setOutput("tag", tag)
+	core.setOutput("preid", preidOutput)
 	core.setOutput("isPrerelease", isPreRel)
 }

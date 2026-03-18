@@ -36,7 +36,7 @@ both semver and non-semver variants as outputs.
 | `majorVersion`     | `1`             | Major version segment.                                                      |
 | `minorVersion`     | `5`             | Minor version segment.                                                      |
 | `patchVersion`     | `6`             | Patch version segment.                                                      |
-| `tag`              | `dev`           | The preid string when pre-release, otherwise an empty string.               |
+| `preid`            | `dev`           | The preid string when pre-release, otherwise an empty string.               |
 | `isPrerelease`     | `true`          | Whether the generated version is a prerelease.                              |
 
 ## Usage
@@ -50,15 +50,15 @@ steps:
     id: version
     uses: sketch7/version-builder-action@v1
     with:
-      version: "1.5.6"           # optional — omit to read from package.json
-      preid: "dev"               # optional
-      preid-branches: "main,master,develop"  # optional
+      version: "1.5.6" # optional — omit to read from package.json
+      preid: "dev" # optional
+      preid-branches: "main,master,develop" # optional
 
   - name: Use outputs
     run: |
       echo "Version:          ${{ steps.version.outputs.version }}"
       echo "Non-semver:       ${{ steps.version.outputs.nonSemverVersion }}"
-      echo "Tag:              ${{ steps.version.outputs.tag }}"
+      echo "Preid:              ${{ steps.version.outputs.preid }}"
       echo "Is pre-release:   ${{ steps.version.outputs.isPrerelease }}"
 ```
 
