@@ -14,7 +14,6 @@
   "scripts": {
     "build": "tsdown",
     "build:watch": "tsdown --watch",
-    "bundle": "pnpm run format:write && pnpm run build",
     "ci-test": "vitest run --coverage",
     "format:check": "oxfmt --check",
     "format:write": "oxfmt --write",

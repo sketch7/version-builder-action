@@ -9,7 +9,7 @@ export default defineConfig({
 		onlyBundle: false
 	},
 	minify: false,
-	sourcemap: true,
+	sourcemap: false,
 	outDir: "dist",
 	outExtensions: () => ({ js: ".js" }),
 	clean: true

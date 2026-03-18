@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   checks:
-    name: Checks (Format, Lint, Test)
+    name: Checks
     runs-on: ubuntu-latest
 
     steps:
@@ -46,6 +46,32 @@ jobs:
       - name: Test
         id: test
         run: pnpm run ci-test
+
+      - name: Build
+        id: build
+        run: pnpm run build
+
+      - name: Check dist/ is up-to-date
+        id: diff
+        run: |
+          if [ ! -d dist/ ]; then
+            echo "Expected dist/ directory does not exist. See status below:"
+            ls -la ./
+            exit 1
+          fi
+          if ! git diff --ignore-space-at-eol --text --quiet dist/; then
+            echo "Detected uncommitted changes after build. See status below:"
+            git diff --ignore-space-at-eol --text dist/
+            exit 1
+          fi
+
+      - if: ${{ failure() && steps.diff.outcome == 'failure' }}
+        name: Upload dist/ artifact
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
 
   test-action:
     name: GitHub Actions Test
