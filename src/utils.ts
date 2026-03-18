@@ -29,7 +29,8 @@ export function parsePreidBranches(entries: string[]): PreidBranchEntry[] {
 }
 
 /**
- * Returns true when the branch matches any of the given regex patterns (full string test).
+ * Returns true when the branch matches any of the given regex patterns using RegExp.test.
+ * Note: patterns are not auto-anchored; use ^ and $ in the pattern if full-string matches are required.
  */
 export function matchesBranchPattern(branch: string, patterns: string[]): boolean {
 	return patterns.some(pattern => new RegExp(pattern).test(branch))
