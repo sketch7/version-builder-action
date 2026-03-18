@@ -27,7 +27,7 @@ inputs:
       entry can be either a plain branch name (uses the global `preid` value) or
       `branch:preid` to map a specific preid per branch e.g.
       'main:rc,master:rc,develop:dev,vnext:next'."
-    default: "main:rc,master:rc,develop:dev"
+    default: "main:rc,master:rc,develop:dev,vnext:next"
   stable-branches:
     required: false
     description: "Regex patterns (comma-delimited) matching stable branches that should

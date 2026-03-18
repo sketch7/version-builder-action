@@ -19664,7 +19664,8 @@ async function run() {
 	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
 		"main:rc",
 		"master:rc",
-		"develop:dev"
+		"develop:dev",
+		"vnext:next"
 	]);
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, runNumber: ${runNumber}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);

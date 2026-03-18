@@ -22,7 +22,7 @@ export async function run(): Promise<void> {
 	let nonSemverVersion = version
 
 	const preidBranches = parsePreidBranches(
-		preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main:rc", "master:rc", "develop:dev"],
+		preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main:rc", "master:rc", "develop:dev", "vnext:next"],
 	)
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"]
 
