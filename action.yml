@@ -49,6 +49,8 @@ inputs:
 outputs:
   version:
     description: "Build version generated e.g. '1.5.6-dev.123'."
+  baseVersion:
+    description: "Base version without preid e.g. '1.5.6'."
   nonSemverVersion:
     description: "Omits the preid and returns just number e.g. '1.5.6'"
   majorVersion:

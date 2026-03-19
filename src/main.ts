@@ -63,6 +63,7 @@ export async function run(): Promise<void> {
 
 	core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`)
 	core.setOutput("version", buildVersion)
+	core.setOutput("baseVersion", baseVersion)
 	core.setOutput("nonSemverVersion", nonSemverVersion) // omits the preid and returns just numbers e.g. '1.0.0'
 	core.setOutput("majorVersion", major)
 	core.setOutput("minorVersion", minor)

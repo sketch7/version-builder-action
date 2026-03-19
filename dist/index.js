@@ -19775,6 +19775,7 @@ async function run() {
 	});
 	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);
+	setOutput("baseVersion", baseVersion);
 	setOutput("nonSemverVersion", nonSemverVersion);
 	setOutput("majorVersion", major);
 	setOutput("minorVersion", minor);

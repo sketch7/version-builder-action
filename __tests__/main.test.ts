@@ -24,4 +24,5 @@ test("runs", () => {
 	const result = cp.execFileSync(np, [ip], options).toString()
 	console.log(result)
 	expect(result).not.toBeNull()
+	expect(result).toContain("::set-output name=baseVersion::4.0.1")
 })
