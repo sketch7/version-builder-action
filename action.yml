@@ -51,8 +51,8 @@ outputs:
     description: "Build version generated e.g. '1.5.6-dev.123'."
   baseVersion:
     description: "Base version without preid e.g. '1.5.6'."
-  nonSemverVersion:
-    description: "Omits the preid and returns just number e.g. '1.5.6'"
+  fileVersion:
+    description: "4-part numeric version for non-semver consumers (e.g. .NET assembly version): '1.5.6.5' on pre-release, '1.5.6' on stable."
   majorVersion:
     description: "Returns the major version e.g. '1'"
   minorVersion:

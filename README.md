@@ -41,17 +41,17 @@ both semver and non-semver variants as outputs.
 
 ## Outputs
 
-| Output             | Example       | Description                                                                                               |
-| ------------------ | ------------- | --------------------------------------------------------------------------------------------------------- |
-| `version`          | `1.5.6-dev.5` | Full semver with preid, or plain version when stable.                                                     |
-| `nonSemverVersion` | `1.5.6.5`     | Version with counter but without preid label; plain version when stable.                                  |
-| `majorVersion`     | `1`           | Major version segment.                                                                                    |
-| `minorVersion`     | `5`           | Minor version segment.                                                                                    |
-| `patchVersion`     | `6`           | Patch version segment.                                                                                    |
-| `preid`            | `dev`         | The preid string when pre-release, otherwise an empty string.                                             |
-| `preidCounter`     | `5`           | The numeric counter appended after the preid (e.g. `5` for `-dev.5`), otherwise an empty string.          |
-| `isPrerelease`     | `true`        | Whether the generated version is a prerelease.                                                            |
-| `tag`              | `latest`      | Dist-tag for the build: preid label when pre-release (e.g. `rc`), `latest` or `v{major}-lts` when stable. |
+| Output         | Example       | Description                                                                                               |
+| -------------- | ------------- | --------------------------------------------------------------------------------------------------------- |
+| `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable.                                                     |
+| `fileVersion`  | `1.5.6.5`     | 4-part numeric version for non-semver consumers (e.g. .NET assembly version); plain version when stable.  |
+| `majorVersion` | `1`           | Major version segment.                                                                                    |
+| `minorVersion` | `5`           | Minor version segment.                                                                                    |
+| `patchVersion` | `6`           | Patch version segment.                                                                                    |
+| `preid`        | `dev`         | The preid string when pre-release, otherwise an empty string.                                             |
+| `preidCounter` | `5`           | The numeric counter appended after the preid (e.g. `5` for `-dev.5`), otherwise an empty string.          |
+| `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                            |
+| `tag`          | `latest`      | Dist-tag for the build: preid label when pre-release (e.g. `rc`), `latest` or `v{major}-lts` when stable. |
 
 ## Branch Behavior (defaults)
 
@@ -87,7 +87,7 @@ steps:
   - name: Use outputs
     run: |
       echo "Version:          ${{ steps.version.outputs.version }}"
-      echo "Non-semver:       ${{ steps.version.outputs.nonSemverVersion }}"
+      echo "File version:     ${{ steps.version.outputs.fileVersion }}"
       echo "Preid:            ${{ steps.version.outputs.preid }}"
       echo "Preid counter:    ${{ steps.version.outputs.preidCounter }}"
       echo "Tag:              ${{ steps.version.outputs.tag }}"
