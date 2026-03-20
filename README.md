@@ -44,6 +44,7 @@ both semver and non-semver variants as outputs.
 | Output         | Example       | Description                                                                                               |
 | -------------- | ------------- | --------------------------------------------------------------------------------------------------------- |
 | `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable.                                                     |
+| `baseVersion`  | `1.5.6`       | Base version without any pre-release suffix (from the `version` input or `package.json`).                 |
 | `fileVersion`  | `1.5.6.5`     | 4-part numeric version for non-semver consumers (e.g. .NET assembly version); plain version when stable.  |
 | `majorVersion` | `1`           | Major version segment.                                                                                    |
 | `minorVersion` | `5`           | Minor version segment.                                                                                    |
