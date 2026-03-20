@@ -78,7 +78,7 @@ steps:
 
   - name: Build version
     id: version
-    uses: sketch7/version-builder-action@v1
+    uses: sketch7/version-builder-action@v3
     with:
       version: "1.5.6" # optional — omit to read from package.json
       preid: "dev" # optional, default fallback preid
@@ -99,7 +99,7 @@ steps:
 
 ```yaml
 - name: Build version (stable)
-  uses: sketch7/version-builder-action@v1
+  uses: sketch7/version-builder-action@v3
   with:
     force-stable: "true"
 ```
@@ -108,7 +108,7 @@ steps:
 
 ```yaml
 - name: Build version (always preid)
-  uses: sketch7/version-builder-action@v1
+  uses: sketch7/version-builder-action@v3
   with:
     force-preid: "true"
     preid: "rc"
@@ -118,7 +118,7 @@ steps:
 
 ```yaml
 - name: Build version
-  uses: sketch7/version-builder-action@v1
+  uses: sketch7/version-builder-action@v3
   with:
     stable-branches: "^v\\d+$,^\\d+\\.x$,^hotfix/.*$"
 ```
