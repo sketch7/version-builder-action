@@ -28,7 +28,7 @@ export async function run(): Promise<void> {
 		version = repoPkgJson.version
 	}
 	const baseVersion = stripPreid(version)
-	let nonSemverVersion = baseVersion
+	let fileVersion = baseVersion
 
 	const preidBranches = parsePreidBranches(
 		preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main:rc", "master:rc", "develop:dev", "vnext:next"],
@@ -51,7 +51,7 @@ export async function run(): Promise<void> {
 		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`
 
 		if (versionSegments.length === 3) {
-			nonSemverVersion = `${baseVersion}.${commitCount}`
+			fileVersion = `${baseVersion}.${commitCount}`
 		}
 	}
 
@@ -61,9 +61,10 @@ export async function run(): Promise<void> {
 	const stableBranchNames = isPreRel ? [] : listRemoteBranchNames().filter(name => matchesBranchPattern(name, stableBranches))
 	const tag = resolveTag({ resolvedPreid, branch, stableBranchNames })
 
-	core.notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`)
+	core.notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`)
 	core.setOutput("version", buildVersion)
-	core.setOutput("nonSemverVersion", nonSemverVersion) // omits the preid and returns just numbers e.g. '1.0.0'
+	core.setOutput("baseVersion", baseVersion)
+	core.setOutput("fileVersion", fileVersion) // 4-part numeric version e.g. '1.0.0.5' on pre-release, '1.0.0' on stable
 	core.setOutput("majorVersion", major)
 	core.setOutput("minorVersion", minor)
 	core.setOutput("patchVersion", patch)

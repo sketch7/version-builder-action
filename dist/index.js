@@ -19739,7 +19739,7 @@ async function run() {
 	const forceStable = getBooleanInput("force-stable");
 	if (!version) version = JSON.parse(await (0, fs_promises.readFile)("./package.json", "utf8")).version;
 	const baseVersion = stripPreid(version);
-	let nonSemverVersion = baseVersion;
+	let fileVersion = baseVersion;
 	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
 		"main:rc",
 		"master:rc",
@@ -19764,7 +19764,7 @@ async function run() {
 	if (isPreRel) {
 		debug("Use preid for branch");
 		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`;
-		if (versionSegments.length === 3) nonSemverVersion = `${baseVersion}.${commitCount}`;
+		if (versionSegments.length === 3) fileVersion = `${baseVersion}.${commitCount}`;
 	}
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
 	const preidOutput = isPreRel ? resolvedPreid : "";
@@ -19773,9 +19773,10 @@ async function run() {
 		branch,
 		stableBranchNames: isPreRel ? [] : listRemoteBranchNames().filter((name) => matchesBranchPattern(name, stableBranches))
 	});
-	notice(`Version: ${buildVersion}, nonSemverVersion: ${nonSemverVersion}, tag: ${tag}`);
+	notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);
-	setOutput("nonSemverVersion", nonSemverVersion);
+	setOutput("baseVersion", baseVersion);
+	setOutput("fileVersion", fileVersion);
 	setOutput("majorVersion", major);
 	setOutput("minorVersion", minor);
 	setOutput("patchVersion", patch);
