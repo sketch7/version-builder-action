@@ -2,7 +2,7 @@ import { defineConfig } from "tsdown";
 
 export default defineConfig({
 	entry: ["src/index.ts"],
-	format: ["cjs"],
+	format: "esm",
 	target: "node24",
 	deps: {
 		alwaysBundle: [/.*/],
@@ -11,6 +11,6 @@ export default defineConfig({
 	minify: false,
 	sourcemap: false,
 	outDir: "dist",
-	outExtensions: () => ({ js: ".js" }),
+	// outExtensions: () => ({ js: ".js" }),
 	clean: true,
 });
