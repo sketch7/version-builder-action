@@ -329,6 +329,29 @@ describe("getCommitCountSinceFileChange", () => {
 			}),
 		).toBe(0);
 	});
+
+	test("includes -G flag in git log command when diffPattern is provided", () => {
+		const commands: string[] = [];
+		let call = 0;
+		const execFn = (cmd: string) => {
+			commands.push(cmd);
+			return call++ === 0 ? "abc123def\n" : "3\n";
+		};
+		expect(getCommitCountSinceFileChange("package.json", execFn, '"version":')).toBe(3);
+		expect(commands[0]).toContain("-G '\"version\":'");
+		expect(commands[0]).not.toContain("-G 'undefined'");
+	});
+
+	test("omits -G flag when no diffPattern", () => {
+		const commands: string[] = [];
+		let call = 0;
+		const execFn = (cmd: string) => {
+			commands.push(cmd);
+			return call++ === 0 ? "abc123def\n" : "2\n";
+		};
+		getCommitCountSinceFileChange("package.json", execFn);
+		expect(commands[0]).not.toContain("-G");
+	});
 });
 
 describe("listRemoteBranchNames", () => {

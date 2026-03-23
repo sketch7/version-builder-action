@@ -19701,12 +19701,14 @@ function resolveTag(input) {
 }
 /**
 * Counts commits on HEAD since the last commit that touched `filePath`.
-* Returns 0 when the file has never been committed, when HEAD is that commit, or if git is unavailable.
-* e.g. if `package.json` was last changed 5 commits ago the counter is 5; bumping the version resets it to 0.
+* When `diffPattern` is provided (a regex passed to git's `-G` flag), only commits where the diff
+* contains a line matching the pattern are considered — e.g., pass `'"version":'` to reset only
+* when the `version` property itself changed, not just when the file was touched.
+* Returns 0 when no matching commit is found, when HEAD is that commit, or if git is unavailable.
 */
-function getCommitCountSinceFileChange(filePath, execFn = (cmd) => execSync(cmd, { encoding: "utf8" })) {
+function getCommitCountSinceFileChange(filePath, execFn = (cmd) => execSync(cmd, { encoding: "utf8" }), diffPattern) {
 	try {
-		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim();
+		const sha = execFn(`git log --follow -n 1 --pretty=format:%H${diffPattern ? ` -G '${diffPattern}'` : ""} -- ${filePath}`).trim();
 		if (!sha) return 0;
 		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim();
 		return parseInt(count, 10) || 0;
@@ -19759,7 +19761,7 @@ async function run() {
 		forceStable
 	});
 	const isPreRel = resolvedPreid !== null;
-	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json") : 0;
+	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json", void 0, "\"version\":") : 0;
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	if (isPreRel) {
 		debug("Use preid for branch");

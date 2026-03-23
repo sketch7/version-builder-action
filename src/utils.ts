@@ -126,15 +126,19 @@ export function resolveTag(input: { resolvedPreid: string | null; branch: string
 
 /**
  * Counts commits on HEAD since the last commit that touched `filePath`.
- * Returns 0 when the file has never been committed, when HEAD is that commit, or if git is unavailable.
- * e.g. if `package.json` was last changed 5 commits ago the counter is 5; bumping the version resets it to 0.
+ * When `diffPattern` is provided (a regex passed to git's `-G` flag), only commits where the diff
+ * contains a line matching the pattern are considered — e.g., pass `'"version":'` to reset only
+ * when the `version` property itself changed, not just when the file was touched.
+ * Returns 0 when no matching commit is found, when HEAD is that commit, or if git is unavailable.
  */
 export function getCommitCountSinceFileChange(
 	filePath: string,
 	execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" }),
+	diffPattern?: string,
 ): number {
 	try {
-		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim();
+		const patternFlag = diffPattern ? ` -G '${diffPattern}'` : "";
+		const sha = execFn(`git log --follow -n 1 --pretty=format:%H${patternFlag} -- ${filePath}`).trim();
 		if (!sha) return 0;
 		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim();
 		return parseInt(count, 10) || 0;
