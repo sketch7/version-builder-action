@@ -1,4 +1,5 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test } from "vitest";
+
 import {
 	getCommitCountSinceFileChange,
 	isPrerelease,
@@ -9,9 +10,9 @@ import {
 	resolvePreid,
 	resolveTag,
 	stripPreid,
-} from "../src/utils"
+} from "../src/utils";
 
-const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"]
+const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"];
 
 describe("isPrerelease", () => {
 	test.each([
@@ -68,9 +69,9 @@ describe("isPrerelease", () => {
 			expected: false,
 		},
 	])("given $name - should be $expected", ({ input, expected }) => {
-		expect(isPrerelease(input)).toBe(expected)
-	})
-})
+		expect(isPrerelease(input)).toBe(expected);
+	});
+});
 
 describe("parsePreidBranches", () => {
 	test.each([
@@ -95,9 +96,9 @@ describe("parsePreidBranches", () => {
 			expected: [{ branch: "main", preid: "rc" }, { branch: "develop" }],
 		},
 	])("given $name - should parse correctly", ({ input, expected }) => {
-		expect(parsePreidBranches(input)).toEqual(expected)
-	})
-})
+		expect(parsePreidBranches(input)).toEqual(expected);
+	});
+});
 
 describe("matchesBranchPattern", () => {
 	test.each([
@@ -110,9 +111,9 @@ describe("matchesBranchPattern", () => {
 		{ name: "v1-beta does not match ^v\\d+$", branch: "v1-beta", patterns: ["^v\\d+$"], expected: false },
 		{ name: "empty patterns always false", branch: "main", patterns: [], expected: false },
 	])("given $name - should be $expected", ({ branch, patterns, expected }) => {
-		expect(matchesBranchPattern(branch, patterns)).toBe(expected)
-	})
-})
+		expect(matchesBranchPattern(branch, patterns)).toBe(expected);
+	});
+});
 
 describe("resolvePreid", () => {
 	test.each([
@@ -289,9 +290,9 @@ describe("resolvePreid", () => {
 			expected: null,
 		},
 	])("given $name - should return $expected", ({ input, expected }) => {
-		expect(resolvePreid(input)).toBe(expected)
-	})
-})
+		expect(resolvePreid(input)).toBe(expected);
+	});
+});
 
 describe("stripPreid", () => {
 	test.each([
@@ -300,59 +301,59 @@ describe("stripPreid", () => {
 		{ name: "next.99 suffix stripped", version: "2.3.4-next.99", expected: "2.3.4" },
 		{ name: "dev suffix stripped", version: "0.1.2-dev.7", expected: "0.1.2" },
 	])("given $name - should be $expected", ({ version, expected }) => {
-		expect(stripPreid(version)).toBe(expected)
-	})
-})
+		expect(stripPreid(version)).toBe(expected);
+	});
+});
 
 describe("getCommitCountSinceFileChange", () => {
 	test("returns commit count since file last changed", () => {
-		let call = 0
-		const execFn = () => (call++ === 0 ? "abc123def\n" : "5\n")
-		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(5)
-	})
+		let call = 0;
+		const execFn = () => (call++ === 0 ? "abc123def\n" : "5\n");
+		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(5);
+	});
 
 	test("returns 0 when file never committed (empty sha)", () => {
-		expect(getCommitCountSinceFileChange("package.json", () => "")).toBe(0)
-	})
+		expect(getCommitCountSinceFileChange("package.json", () => "")).toBe(0);
+	});
 
 	test("returns 0 when HEAD is the version bump commit (count = 0)", () => {
-		let call = 0
-		const execFn = () => (call++ === 0 ? "abc123def\n" : "0\n")
-		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(0)
-	})
+		let call = 0;
+		const execFn = () => (call++ === 0 ? "abc123def\n" : "0\n");
+		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(0);
+	});
 
 	test("returns 0 on git error", () => {
 		expect(
 			getCommitCountSinceFileChange("package.json", () => {
-				throw new Error("not a git repo")
+				throw new Error("not a git repo");
 			}),
-		).toBe(0)
-	})
-})
+		).toBe(0);
+	});
+});
 
 describe("listRemoteBranchNames", () => {
 	test("parses branch names from ls-remote output", () => {
-		const output = ["abc123\trefs/heads/main", "def456\trefs/heads/v1", "ghi789\trefs/heads/2.x"].join("\n")
-		expect(listRemoteBranchNames(() => output)).toEqual(["main", "v1", "2.x"])
-	})
+		const output = ["abc123\trefs/heads/main", "def456\trefs/heads/v1", "ghi789\trefs/heads/2.x"].join("\n");
+		expect(listRemoteBranchNames(() => output)).toEqual(["main", "v1", "2.x"]);
+	});
 
 	test("returns empty array when output is empty", () => {
-		expect(listRemoteBranchNames(() => "")).toEqual([])
-	})
+		expect(listRemoteBranchNames(() => "")).toEqual([]);
+	});
 
 	test("returns empty array on git error", () => {
 		expect(
 			listRemoteBranchNames(() => {
-				throw new Error("no remote")
+				throw new Error("no remote");
 			}),
-		).toEqual([])
-	})
+		).toEqual([]);
+	});
 
 	test("trims and filters blank lines", () => {
-		const output = "abc123\trefs/heads/v2\n\n"
-		expect(listRemoteBranchNames(() => output)).toEqual(["v2"])
-	})
-})
+		const output = "abc123\trefs/heads/v2\n\n";
+		expect(listRemoteBranchNames(() => output)).toEqual(["v2"]);
+	});
+});
 
 describe("parseBranchVersion", () => {
 	test.each([
@@ -366,9 +367,9 @@ describe("parseBranchVersion", () => {
 		{ name: "feature/foo returns null", branch: "feature/foo", expected: null },
 		{ name: "develop returns null", branch: "develop", expected: null },
 	])("given $name - should be $expected", ({ branch, expected }) => {
-		expect(parseBranchVersion(branch)).toEqual(expected)
-	})
-})
+		expect(parseBranchVersion(branch)).toEqual(expected);
+	});
+});
 
 describe("resolveTag", () => {
 	test.each([
@@ -420,6 +421,6 @@ describe("resolveTag", () => {
 			expected: "latest",
 		},
 	])("given $name - should be $expected", ({ input, expected }) => {
-		expect(resolveTag(input)).toBe(expected)
-	})
-})
+		expect(resolveTag(input)).toBe(expected);
+	});
+});

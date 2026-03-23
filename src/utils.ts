@@ -1,19 +1,19 @@
-import { execSync } from "child_process"
+import { execSync } from "child_process";
 
 export function coerceArray<T>(value: T | T[]): T[] {
-	return Array.isArray(value) ? value : [value]
+	return Array.isArray(value) ? value : [value];
 }
 
 export function isPrerelease(input: { branch: string; preidBranches: string[]; forcePreid?: boolean; forceStable?: boolean }): boolean {
-	if (input.forceStable) return false
-	if (input.forcePreid) return true
-	return input.preidBranches.includes(input.branch)
+	if (input.forceStable) return false;
+	if (input.forcePreid) return true;
+	return input.preidBranches.includes(input.branch);
 }
 
 export interface PreidBranchEntry {
-	branch: string
+	branch: string;
 	/** When undefined, falls back to the global default preid. */
-	preid?: string
+	preid?: string;
 }
 
 /**
@@ -22,12 +22,12 @@ export interface PreidBranchEntry {
  */
 export function parsePreidBranches(entries: string[]): PreidBranchEntry[] {
 	return entries.map(entry => {
-		const colonIdx = entry.indexOf(":")
+		const colonIdx = entry.indexOf(":");
 		if (colonIdx === -1) {
-			return { branch: entry }
+			return { branch: entry };
 		}
-		return { branch: entry.slice(0, colonIdx), preid: entry.slice(colonIdx + 1) }
-	})
+		return { branch: entry.slice(0, colonIdx), preid: entry.slice(colonIdx + 1) };
+	});
 }
 
 /**
@@ -35,7 +35,7 @@ export function parsePreidBranches(entries: string[]): PreidBranchEntry[] {
  * Note: patterns are not auto-anchored; use ^ and $ in the pattern if full-string matches are required.
  */
 export function matchesBranchPattern(branch: string, patterns: string[]): boolean {
-	return patterns.some(pattern => new RegExp(pattern).test(branch))
+	return patterns.some(pattern => new RegExp(pattern).test(branch));
 }
 
 /**
@@ -50,22 +50,22 @@ export function matchesBranchPattern(branch: string, patterns: string[]): boolea
  * 5. Fallback → `defaultPreid` (any other branch is treated as pre-release)
  */
 export function resolvePreid(input: {
-	branch: string
-	preidBranches: PreidBranchEntry[]
-	stableBranches: string[]
-	defaultPreid: string
-	forcePreid?: boolean
-	forceStable?: boolean
+	branch: string;
+	preidBranches: PreidBranchEntry[];
+	stableBranches: string[];
+	defaultPreid: string;
+	forcePreid?: boolean;
+	forceStable?: boolean;
 }): string | null {
-	if (input.forceStable) return null
+	if (input.forceStable) return null;
 	if (input.forcePreid) {
-		const match = input.preidBranches.find(e => e.branch === input.branch)
-		return match?.preid ?? input.defaultPreid
+		const match = input.preidBranches.find(e => e.branch === input.branch);
+		return match?.preid ?? input.defaultPreid;
 	}
-	const match = input.preidBranches.find(e => e.branch === input.branch)
-	if (match) return match.preid ?? input.defaultPreid
-	if (matchesBranchPattern(input.branch, input.stableBranches)) return null
-	return input.defaultPreid
+	const match = input.preidBranches.find(e => e.branch === input.branch);
+	if (match) return match.preid ?? input.defaultPreid;
+	if (matchesBranchPattern(input.branch, input.stableBranches)) return null;
+	return input.defaultPreid;
 }
 
 /**
@@ -73,8 +73,8 @@ export function resolvePreid(input: {
  * e.g. `"1.0.0-rc.0"` → `"1.0.0"`, `"1.0.0"` → `"1.0.0"`.
  */
 export function stripPreid(version: string): string {
-	const idx = version.indexOf("-")
-	return idx === -1 ? version : version.slice(0, idx)
+	const idx = version.indexOf("-");
+	return idx === -1 ? version : version.slice(0, idx);
 }
 
 /**
@@ -84,21 +84,21 @@ export function stripPreid(version: string): string {
  * e.g. `"v1"` → `[1]`, `"2.x"` → `[2]`, `"v3.1"` → `[3, 1]`, `"main"` → `null`.
  */
 export function parseBranchVersion(branch: string): number[] | null {
-	let normalized = branch.startsWith("v") ? branch.slice(1) : branch
-	normalized = normalized.replace(/\.x$/, "")
-	if (!normalized) return null
-	const parts = normalized.split(".")
-	if (parts.some(p => p === "" || !/^\d+$/.test(p))) return null
-	return parts.map(Number)
+	let normalized = branch.startsWith("v") ? branch.slice(1) : branch;
+	normalized = normalized.replace(/\.x$/, "");
+	if (!normalized) return null;
+	const parts = normalized.split(".");
+	if (parts.some(p => p === "" || !/^\d+$/.test(p))) return null;
+	return parts.map(Number);
 }
 
 function compareVersionArrays(a: number[], b: number[]): number {
-	const len = Math.max(a.length, b.length)
+	const len = Math.max(a.length, b.length);
 	for (let i = 0; i < len; i++) {
-		const diff = (a[i] ?? 0) - (b[i] ?? 0)
-		if (diff !== 0) return diff
+		const diff = (a[i] ?? 0) - (b[i] ?? 0);
+		if (diff !== 0) return diff;
 	}
-	return 0
+	return 0;
 }
 
 /**
@@ -109,19 +109,19 @@ function compareVersionArrays(a: number[], b: number[]): number {
  *   Falls back to `"latest"` when no branch versions can be parsed.
  */
 export function resolveTag(input: { resolvedPreid: string | null; branch: string; stableBranchNames: string[] }): string {
-	if (input.resolvedPreid !== null) return input.resolvedPreid
+	if (input.resolvedPreid !== null) return input.resolvedPreid;
 
 	const versioned = input.stableBranchNames
 		.map(name => ({ name, version: parseBranchVersion(name) }))
-		.filter((e): e is { name: string; version: number[] } => e.version !== null)
+		.filter((e): e is { name: string; version: number[] } => e.version !== null);
 
-	if (versioned.length === 0) return "latest"
+	if (versioned.length === 0) return "latest";
 
-	const highest = versioned.reduce((best, cur) => (compareVersionArrays(cur.version, best.version) > 0 ? cur : best))
-	const currentVersion = parseBranchVersion(input.branch)
-	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest"
-	const major = currentVersion?.[0]
-	return major !== undefined ? `v${major}-lts` : "latest"
+	const highest = versioned.reduce((best, cur) => (compareVersionArrays(cur.version, best.version) > 0 ? cur : best));
+	const currentVersion = parseBranchVersion(input.branch);
+	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest";
+	const major = currentVersion?.[0];
+	return major !== undefined ? `v${major}-lts` : "latest";
 }
 
 /**
@@ -134,12 +134,12 @@ export function getCommitCountSinceFileChange(
 	execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" }),
 ): number {
 	try {
-		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim()
-		if (!sha) return 0
-		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim()
-		return parseInt(count, 10) || 0
+		const sha = execFn(`git log --follow -n 1 --pretty=format:%H -- ${filePath}`).trim();
+		if (!sha) return 0;
+		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim();
+		return parseInt(count, 10) || 0;
 	} catch {
-		return 0
+		return 0;
 	}
 }
 
@@ -149,12 +149,12 @@ export function getCommitCountSinceFileChange(
  */
 export function listRemoteBranchNames(execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" })): string[] {
 	try {
-		const output = execFn("git ls-remote --heads origin")
+		const output = execFn("git ls-remote --heads origin");
 		return output
 			.split("\n")
 			.map(line => /refs\/heads\/(.+)$/.exec(line)?.[1]?.trim() ?? null)
-			.filter((name): name is string => name !== null && name.length > 0)
+			.filter((name): name is string => name !== null && name.length > 0);
 	} catch {
-		return []
+		return [];
 	}
 }
