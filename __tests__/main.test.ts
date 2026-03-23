@@ -1,21 +1,22 @@
-import * as core from "@actions/core"
-import * as github from "@actions/github"
-import { expect, test, vi } from "vitest"
-import { run } from "../src/main"
-import * as utils from "../src/utils"
+import * as core from "@actions/core";
+import * as github from "@actions/github";
+import { expect, test, vi } from "vitest";
 
-vi.mock("@actions/core")
+import { run } from "../src/main";
+import type * as utils from "../src/utils";
+
+vi.mock("@actions/core");
 vi.mock("@actions/github", () => ({
 	context: { ref: "refs/heads/feature/my-workflow" },
-}))
+}));
 vi.mock("../src/utils", async importOriginal => {
-	const actual = await importOriginal<typeof utils>()
+	const actual = await importOriginal<typeof utils>();
 	return {
 		...actual,
 		getCommitCountSinceFileChange: vi.fn().mockReturnValue(0),
 		listRemoteBranchNames: vi.fn().mockReturnValue([]),
-	}
-})
+	};
+});
 
 const dataset = [
 	{
@@ -90,10 +91,10 @@ const dataset = [
 			tag: "dev",
 		},
 	},
-]
+];
 
 test.each(dataset)("given $name - outputs should match expected", async ({ input, expected }) => {
-	vi.mocked(github).context = { ref: input.ref } as typeof github.context
+	vi.mocked(github).context = { ref: input.ref } as typeof github.context;
 	vi.mocked(core.getInput).mockImplementation((name: string) => {
 		const map: Record<string, string> = {
 			version: input.version,
@@ -101,25 +102,25 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 			"preid-branches": input.preidBranches,
 			"stable-branches": input.stableBranches,
 			"preid-num-delimiter": ".",
-		}
-		return map[name] ?? ""
-	})
+		};
+		return map[name] ?? "";
+	});
 	vi.mocked(core.getBooleanInput).mockImplementation((name: string) => {
-		if (name === "force-preid") return input.forcePreid === "true"
-		if (name === "force-stable") return input.forceStable === "true"
-		return false
-	})
+		if (name === "force-preid") return input.forcePreid === "true";
+		if (name === "force-stable") return input.forceStable === "true";
+		return false;
+	});
 
-	await run()
+	await run();
 
-	expect(core.setOutput).toHaveBeenCalledWith("version", expected.version)
-	expect(core.setOutput).toHaveBeenCalledWith("baseVersion", expected.baseVersion)
-	expect(core.setOutput).toHaveBeenCalledWith("fileVersion", expected.fileVersion)
-	expect(core.setOutput).toHaveBeenCalledWith("majorVersion", expected.majorVersion)
-	expect(core.setOutput).toHaveBeenCalledWith("minorVersion", expected.minorVersion)
-	expect(core.setOutput).toHaveBeenCalledWith("patchVersion", expected.patchVersion)
-	expect(core.setOutput).toHaveBeenCalledWith("preid", expected.preid)
-	expect(core.setOutput).toHaveBeenCalledWith("preidCounter", expected.preidCounter)
-	expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", expected.isPrerelease)
-	expect(core.setOutput).toHaveBeenCalledWith("tag", expected.tag)
-})
+	expect(core.setOutput).toHaveBeenCalledWith("version", expected.version);
+	expect(core.setOutput).toHaveBeenCalledWith("baseVersion", expected.baseVersion);
+	expect(core.setOutput).toHaveBeenCalledWith("fileVersion", expected.fileVersion);
+	expect(core.setOutput).toHaveBeenCalledWith("majorVersion", expected.majorVersion);
+	expect(core.setOutput).toHaveBeenCalledWith("minorVersion", expected.minorVersion);
+	expect(core.setOutput).toHaveBeenCalledWith("patchVersion", expected.patchVersion);
+	expect(core.setOutput).toHaveBeenCalledWith("preid", expected.preid);
+	expect(core.setOutput).toHaveBeenCalledWith("preidCounter", expected.preidCounter);
+	expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", expected.isPrerelease);
+	expect(core.setOutput).toHaveBeenCalledWith("tag", expected.tag);
+});
