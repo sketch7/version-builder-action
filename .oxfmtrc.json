@@ -7,7 +7,6 @@
   "arrowParens": "avoid",
   "bracketSameLine": true,
   "bracketSpacing": true,
-  "printWidth": 140,
   "sortImports": {
     "groups": [
       ["side_effect", "builtin", "external"],
