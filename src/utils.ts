@@ -5,8 +5,12 @@ export function coerceArray<T>(value: T | T[]): T[] {
 }
 
 export function isPrerelease(input: { branch: string; preidBranches: string[]; forcePreid?: boolean; forceStable?: boolean }): boolean {
-	if (input.forceStable) return false;
-	if (input.forcePreid) return true;
+	if (input.forceStable) {
+		return false;
+	}
+	if (input.forcePreid) {
+		return true;
+	}
 	return input.preidBranches.includes(input.branch);
 }
 
@@ -57,14 +61,20 @@ export function resolvePreid(input: {
 	forcePreid?: boolean;
 	forceStable?: boolean;
 }): string | null {
-	if (input.forceStable) return null;
+	if (input.forceStable) {
+		return null;
+	}
 	if (input.forcePreid) {
 		const match = input.preidBranches.find(e => e.branch === input.branch);
 		return match?.preid ?? input.defaultPreid;
 	}
 	const match = input.preidBranches.find(e => e.branch === input.branch);
-	if (match) return match.preid ?? input.defaultPreid;
-	if (matchesBranchPattern(input.branch, input.stableBranches)) return null;
+	if (match) {
+		return match.preid ?? input.defaultPreid;
+	}
+	if (matchesBranchPattern(input.branch, input.stableBranches)) {
+		return null;
+	}
 	return input.defaultPreid;
 }
 
@@ -86,9 +96,13 @@ export function stripPreid(version: string): string {
 export function parseBranchVersion(branch: string): number[] | null {
 	let normalized = branch.startsWith("v") ? branch.slice(1) : branch;
 	normalized = normalized.replace(/\.x$/, "");
-	if (!normalized) return null;
+	if (!normalized) {
+		return null;
+	}
 	const parts = normalized.split(".");
-	if (parts.some(p => p === "" || !/^\d+$/.test(p))) return null;
+	if (parts.some(p => p === "" || !/^\d+$/.test(p))) {
+		return null;
+	}
 	return parts.map(Number);
 }
 
@@ -96,7 +110,9 @@ function compareVersionArrays(a: number[], b: number[]): number {
 	const len = Math.max(a.length, b.length);
 	for (let i = 0; i < len; i++) {
 		const diff = (a[i] ?? 0) - (b[i] ?? 0);
-		if (diff !== 0) return diff;
+		if (diff !== 0) {
+			return diff;
+		}
 	}
 	return 0;
 }
@@ -109,17 +125,23 @@ function compareVersionArrays(a: number[], b: number[]): number {
  *   Falls back to `"latest"` when no branch versions can be parsed.
  */
 export function resolveTag(input: { resolvedPreid: string | null; branch: string; stableBranchNames: string[] }): string {
-	if (input.resolvedPreid !== null) return input.resolvedPreid;
+	if (input.resolvedPreid !== null) {
+		return input.resolvedPreid;
+	}
 
 	const versioned = input.stableBranchNames
 		.map(name => ({ name, version: parseBranchVersion(name) }))
 		.filter((e): e is { name: string; version: number[] } => e.version !== null);
 
-	if (versioned.length === 0) return "latest";
+	if (versioned.length === 0) {
+		return "latest";
+	}
 
 	const highest = versioned.reduce((best, cur) => (compareVersionArrays(cur.version, best.version) > 0 ? cur : best));
 	const currentVersion = parseBranchVersion(input.branch);
-	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest";
+	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) {
+		return "latest";
+	}
 	const major = currentVersion?.[0];
 	return major !== undefined ? `v${major}-lts` : "latest";
 }
@@ -139,7 +161,9 @@ export function getCommitCountSinceFileChange(
 	try {
 		const patternFlag = diffPattern ? ` -G '${diffPattern}'` : "";
 		const sha = execFn(`git log --follow -n 1 --pretty=format:%H${patternFlag} -- ${filePath}`).trim();
-		if (!sha) return 0;
+		if (!sha) {
+			return 0;
+		}
 		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim();
 		return parseInt(count, 10) || 0;
 	} catch {

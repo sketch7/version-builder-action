@@ -1,6 +1,6 @@
 {
   "name": "@ssv/version-builder-action",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "private": true,
   "keywords": [
     "actions",
@@ -28,12 +28,12 @@
     "build": "tsdown",
     "build:watch": "tsdown --watch",
     "ci-test": "vitest run --coverage",
-    "format": "oxfmt --write",
-    "format:check": "oxfmt --check",
+    "fmt": "oxfmt --write",
+    "fmt:check": "oxfmt --check",
     "lint": "oxlint --tsconfig=./tsconfig.json src __tests__",
     "test": "vitest run",
     "test:watch": "vitest",
-    "all": "pnpm run format:write && pnpm run lint && pnpm run test && pnpm run build"
+    "all": "pnpm run fmt && pnpm run lint && pnpm run test && pnpm run build"
   },
   "dependencies": {
     "@actions/core": "^3.0.0",
@@ -41,15 +41,15 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "@vitest/coverage-v8": "^4.1.0",
-    "oxfmt": "^0.41.0",
-    "oxlint": "^1.56.0",
-    "tsdown": "^0.21.4",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.0"
+    "@vitest/coverage-v8": "^4.1.2",
+    "oxfmt": "^0.42.0",
+    "oxlint": "^1.57.0",
+    "tsdown": "^0.21.6",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.32.1"
+  "packageManager": "pnpm@10.33.0"
 }

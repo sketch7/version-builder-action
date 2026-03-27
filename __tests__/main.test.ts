@@ -3,6 +3,7 @@ import * as github from "@actions/github";
 import { expect, test, vi } from "vitest";
 
 import { run } from "../src/main";
+// oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
 
 vi.mock("@actions/core");
@@ -106,8 +107,12 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 		return map[name] ?? "";
 	});
 	vi.mocked(core.getBooleanInput).mockImplementation((name: string) => {
-		if (name === "force-preid") return input.forcePreid === "true";
-		if (name === "force-stable") return input.forceStable === "true";
+		if (name === "force-preid") {
+			return input.forcePreid === "true";
+		}
+		if (name === "force-stable") {
+			return input.forceStable === "true";
+		}
 		return false;
 	});
 

@@ -4,7 +4,11 @@ import os, { EOL } from "os";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import { constants, existsSync, promises, readFileSync } from "fs";
+import * as path from "path";
+import * as events from "events";
+import * as child from "child_process";
 import { execSync } from "child_process";
+import { setTimeout as setTimeout$1 } from "timers";
 import { readFile } from "fs/promises";
 
 //#region \0rolldown/runtime.js
@@ -159,7 +163,7 @@ var require_tunnel$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 	var tls = __require("tls");
 	var http$2 = __require("http");
 	var https$1 = __require("https");
-	var events = __require("events");
+	var events$1 = __require("events");
 	__require("assert");
 	var util$2 = __require("util");
 	exports.httpOverHttp = httpOverHttp;
@@ -211,7 +215,7 @@ var require_tunnel$1 = /* @__PURE__ */ __commonJSMin(((exports) => {
 			self.removeSocket(socket);
 		});
 	}
-	util$2.inherits(TunnelingAgent, events.EventEmitter);
+	util$2.inherits(TunnelingAgent, events$1.EventEmitter);
 	TunnelingAgent.prototype.addRequest = function addRequest(req, host, port, localAddress) {
 		var self = this;
 		var options = mergeOptions({ request: req }, self.options, toOptions(host, port, localAddress));
@@ -16191,6 +16195,86 @@ var __awaiter$6 = void 0 && (void 0).__awaiter || function(thisArg, _arguments, 
 const { chmod, copyFile, lstat, mkdir, open, readdir, rename, rm, rmdir, stat, symlink, unlink } = fs.promises;
 const IS_WINDOWS$1 = process.platform === "win32";
 const READONLY = fs.constants.O_RDONLY;
+function exists(fsPath) {
+	return __awaiter$6(this, void 0, void 0, function* () {
+		try {
+			yield stat(fsPath);
+		} catch (err) {
+			if (err.code === "ENOENT") return false;
+			throw err;
+		}
+		return true;
+	});
+}
+/**
+* On OSX/Linux, true if path starts with '/'. On Windows, true for paths like:
+* \, \hello, \\hello\share, C:, and C:\hello (and corresponding alternate separator cases).
+*/
+function isRooted(p) {
+	p = normalizeSeparators(p);
+	if (!p) throw new Error("isRooted() parameter \"p\" cannot be empty");
+	if (IS_WINDOWS$1) return p.startsWith("\\") || /^[A-Z]:/i.test(p);
+	return p.startsWith("/");
+}
+/**
+* Best effort attempt to determine whether a file exists and is executable.
+* @param filePath    file path to check
+* @param extensions  additional file extensions to try
+* @return if file exists and is executable, returns the file path. otherwise empty string.
+*/
+function tryGetExecutablePath(filePath, extensions) {
+	return __awaiter$6(this, void 0, void 0, function* () {
+		let stats = void 0;
+		try {
+			stats = yield stat(filePath);
+		} catch (err) {
+			if (err.code !== "ENOENT") console.log(`Unexpected error attempting to determine if executable file exists '${filePath}': ${err}`);
+		}
+		if (stats && stats.isFile()) {
+			if (IS_WINDOWS$1) {
+				const upperExt = path.extname(filePath).toUpperCase();
+				if (extensions.some((validExt) => validExt.toUpperCase() === upperExt)) return filePath;
+			} else if (isUnixExecutable(stats)) return filePath;
+		}
+		const originalFilePath = filePath;
+		for (const extension of extensions) {
+			filePath = originalFilePath + extension;
+			stats = void 0;
+			try {
+				stats = yield stat(filePath);
+			} catch (err) {
+				if (err.code !== "ENOENT") console.log(`Unexpected error attempting to determine if executable file exists '${filePath}': ${err}`);
+			}
+			if (stats && stats.isFile()) {
+				if (IS_WINDOWS$1) {
+					try {
+						const directory = path.dirname(filePath);
+						const upperName = path.basename(filePath).toUpperCase();
+						for (const actualName of yield readdir(directory)) if (upperName === actualName.toUpperCase()) {
+							filePath = path.join(directory, actualName);
+							break;
+						}
+					} catch (err) {
+						console.log(`Unexpected error attempting to determine the actual case of the file '${filePath}': ${err}`);
+					}
+					return filePath;
+				} else if (isUnixExecutable(stats)) return filePath;
+			}
+		}
+		return "";
+	});
+}
+function normalizeSeparators(p) {
+	p = p || "";
+	if (IS_WINDOWS$1) {
+		p = p.replace(/\//g, "\\");
+		return p.replace(/\\\\+/g, "\\");
+	}
+	return p.replace(/\/\/+/g, "/");
+}
+function isUnixExecutable(stats) {
+	return (stats.mode & 1) > 0 || (stats.mode & 8) > 0 && process.getgid !== void 0 && stats.gid === process.getgid() || (stats.mode & 64) > 0 && process.getuid !== void 0 && stats.uid === process.getuid();
+}
 
 //#endregion
 //#region node_modules/.pnpm/@actions+io@3.0.2/node_modules/@actions/io/lib/io.js
@@ -16221,6 +16305,58 @@ var __awaiter$5 = void 0 && (void 0).__awaiter || function(thisArg, _arguments, 
 		step((generator = generator.apply(thisArg, _arguments || [])).next());
 	});
 };
+/**
+* Returns path of a tool had the tool actually been invoked.  Resolves via paths.
+* If you check and the tool does not exist, it will throw.
+*
+* @param     tool              name of the tool
+* @param     check             whether to check if tool exists
+* @returns   Promise<string>   path to tool
+*/
+function which(tool, check) {
+	return __awaiter$5(this, void 0, void 0, function* () {
+		if (!tool) throw new Error("parameter 'tool' is required");
+		if (check) {
+			const result = yield which(tool, false);
+			if (!result) if (IS_WINDOWS$1) throw new Error(`Unable to locate executable file: ${tool}. Please verify either the file path exists or the file can be found within a directory specified by the PATH environment variable. Also verify the file has a valid extension for an executable file.`);
+			else throw new Error(`Unable to locate executable file: ${tool}. Please verify either the file path exists or the file can be found within a directory specified by the PATH environment variable. Also check the file mode to verify the file is executable.`);
+			return result;
+		}
+		const matches = yield findInPath(tool);
+		if (matches && matches.length > 0) return matches[0];
+		return "";
+	});
+}
+/**
+* Returns a list of all occurrences of the given tool on the system path.
+*
+* @returns   Promise<string[]>  the paths of the tool
+*/
+function findInPath(tool) {
+	return __awaiter$5(this, void 0, void 0, function* () {
+		if (!tool) throw new Error("parameter 'tool' is required");
+		const extensions = [];
+		if (IS_WINDOWS$1 && process.env["PATHEXT"]) {
+			for (const extension of process.env["PATHEXT"].split(path.delimiter)) if (extension) extensions.push(extension);
+		}
+		if (isRooted(tool)) {
+			const filePath = yield tryGetExecutablePath(tool, extensions);
+			if (filePath) return [filePath];
+			return [];
+		}
+		if (tool.includes(path.sep)) return [];
+		const directories = [];
+		if (process.env.PATH) {
+			for (const p of process.env.PATH.split(path.delimiter)) if (p) directories.push(p);
+		}
+		const matches = [];
+		for (const directory of directories) {
+			const filePath = yield tryGetExecutablePath(path.join(directory, tool), extensions);
+			if (filePath) matches.push(filePath);
+		}
+		return matches;
+	});
+}
 
 //#endregion
 //#region node_modules/.pnpm/@actions+exec@3.0.0/node_modules/@actions/exec/lib/toolrunner.js
@@ -16252,6 +16388,290 @@ var __awaiter$4 = void 0 && (void 0).__awaiter || function(thisArg, _arguments, 
 	});
 };
 const IS_WINDOWS = process.platform === "win32";
+var ToolRunner = class extends events.EventEmitter {
+	constructor(toolPath, args, options) {
+		super();
+		if (!toolPath) throw new Error("Parameter 'toolPath' cannot be null or empty.");
+		this.toolPath = toolPath;
+		this.args = args || [];
+		this.options = options || {};
+	}
+	_debug(message) {
+		if (this.options.listeners && this.options.listeners.debug) this.options.listeners.debug(message);
+	}
+	_getCommandString(options, noPrefix) {
+		const toolPath = this._getSpawnFileName();
+		const args = this._getSpawnArgs(options);
+		let cmd = noPrefix ? "" : "[command]";
+		if (IS_WINDOWS) if (this._isCmdFile()) {
+			cmd += toolPath;
+			for (const a of args) cmd += ` ${a}`;
+		} else if (options.windowsVerbatimArguments) {
+			cmd += `"${toolPath}"`;
+			for (const a of args) cmd += ` ${a}`;
+		} else {
+			cmd += this._windowsQuoteCmdArg(toolPath);
+			for (const a of args) cmd += ` ${this._windowsQuoteCmdArg(a)}`;
+		}
+		else {
+			cmd += toolPath;
+			for (const a of args) cmd += ` ${a}`;
+		}
+		return cmd;
+	}
+	_processLineBuffer(data, strBuffer, onLine) {
+		try {
+			let s = strBuffer + data.toString();
+			let n = s.indexOf(os$1.EOL);
+			while (n > -1) {
+				onLine(s.substring(0, n));
+				s = s.substring(n + os$1.EOL.length);
+				n = s.indexOf(os$1.EOL);
+			}
+			return s;
+		} catch (err) {
+			this._debug(`error processing line. Failed with error ${err}`);
+			return "";
+		}
+	}
+	_getSpawnFileName() {
+		if (IS_WINDOWS) {
+			if (this._isCmdFile()) return process.env["COMSPEC"] || "cmd.exe";
+		}
+		return this.toolPath;
+	}
+	_getSpawnArgs(options) {
+		if (IS_WINDOWS) {
+			if (this._isCmdFile()) {
+				let argline = `/D /S /C "${this._windowsQuoteCmdArg(this.toolPath)}`;
+				for (const a of this.args) {
+					argline += " ";
+					argline += options.windowsVerbatimArguments ? a : this._windowsQuoteCmdArg(a);
+				}
+				argline += "\"";
+				return [argline];
+			}
+		}
+		return this.args;
+	}
+	_endsWith(str, end) {
+		return str.endsWith(end);
+	}
+	_isCmdFile() {
+		const upperToolPath = this.toolPath.toUpperCase();
+		return this._endsWith(upperToolPath, ".CMD") || this._endsWith(upperToolPath, ".BAT");
+	}
+	_windowsQuoteCmdArg(arg) {
+		if (!this._isCmdFile()) return this._uvQuoteCmdArg(arg);
+		if (!arg) return "\"\"";
+		const cmdSpecialChars = [
+			" ",
+			"	",
+			"&",
+			"(",
+			")",
+			"[",
+			"]",
+			"{",
+			"}",
+			"^",
+			"=",
+			";",
+			"!",
+			"'",
+			"+",
+			",",
+			"`",
+			"~",
+			"|",
+			"<",
+			">",
+			"\""
+		];
+		let needsQuotes = false;
+		for (const char of arg) if (cmdSpecialChars.some((x) => x === char)) {
+			needsQuotes = true;
+			break;
+		}
+		if (!needsQuotes) return arg;
+		let reverse = "\"";
+		let quoteHit = true;
+		for (let i = arg.length; i > 0; i--) {
+			reverse += arg[i - 1];
+			if (quoteHit && arg[i - 1] === "\\") reverse += "\\";
+			else if (arg[i - 1] === "\"") {
+				quoteHit = true;
+				reverse += "\"";
+			} else quoteHit = false;
+		}
+		reverse += "\"";
+		return reverse.split("").reverse().join("");
+	}
+	_uvQuoteCmdArg(arg) {
+		if (!arg) return "\"\"";
+		if (!arg.includes(" ") && !arg.includes("	") && !arg.includes("\"")) return arg;
+		if (!arg.includes("\"") && !arg.includes("\\")) return `"${arg}"`;
+		let reverse = "\"";
+		let quoteHit = true;
+		for (let i = arg.length; i > 0; i--) {
+			reverse += arg[i - 1];
+			if (quoteHit && arg[i - 1] === "\\") reverse += "\\";
+			else if (arg[i - 1] === "\"") {
+				quoteHit = true;
+				reverse += "\\";
+			} else quoteHit = false;
+		}
+		reverse += "\"";
+		return reverse.split("").reverse().join("");
+	}
+	_cloneExecOptions(options) {
+		options = options || {};
+		const result = {
+			cwd: options.cwd || process.cwd(),
+			env: options.env || process.env,
+			silent: options.silent || false,
+			windowsVerbatimArguments: options.windowsVerbatimArguments || false,
+			failOnStdErr: options.failOnStdErr || false,
+			ignoreReturnCode: options.ignoreReturnCode || false,
+			delay: options.delay || 1e4
+		};
+		result.outStream = options.outStream || process.stdout;
+		result.errStream = options.errStream || process.stderr;
+		return result;
+	}
+	_getSpawnOptions(options, toolPath) {
+		options = options || {};
+		const result = {};
+		result.cwd = options.cwd;
+		result.env = options.env;
+		result["windowsVerbatimArguments"] = options.windowsVerbatimArguments || this._isCmdFile();
+		if (options.windowsVerbatimArguments) result.argv0 = `"${toolPath}"`;
+		return result;
+	}
+	/**
+	* Exec a tool.
+	* Output will be streamed to the live console.
+	* Returns promise with return code
+	*
+	* @param     tool     path to tool to exec
+	* @param     options  optional exec options.  See ExecOptions
+	* @returns   number
+	*/
+	exec() {
+		return __awaiter$4(this, void 0, void 0, function* () {
+			if (!isRooted(this.toolPath) && (this.toolPath.includes("/") || IS_WINDOWS && this.toolPath.includes("\\"))) this.toolPath = path.resolve(process.cwd(), this.options.cwd || process.cwd(), this.toolPath);
+			this.toolPath = yield which(this.toolPath, true);
+			return new Promise((resolve, reject) => __awaiter$4(this, void 0, void 0, function* () {
+				this._debug(`exec tool: ${this.toolPath}`);
+				this._debug("arguments:");
+				for (const arg of this.args) this._debug(`   ${arg}`);
+				const optionsNonNull = this._cloneExecOptions(this.options);
+				if (!optionsNonNull.silent && optionsNonNull.outStream) optionsNonNull.outStream.write(this._getCommandString(optionsNonNull) + os$1.EOL);
+				const state = new ExecState(optionsNonNull, this.toolPath);
+				state.on("debug", (message) => {
+					this._debug(message);
+				});
+				if (this.options.cwd && !(yield exists(this.options.cwd))) return reject(/* @__PURE__ */ new Error(`The cwd: ${this.options.cwd} does not exist!`));
+				const fileName = this._getSpawnFileName();
+				const cp = child.spawn(fileName, this._getSpawnArgs(optionsNonNull), this._getSpawnOptions(this.options, fileName));
+				let stdbuffer = "";
+				if (cp.stdout) cp.stdout.on("data", (data) => {
+					if (this.options.listeners && this.options.listeners.stdout) this.options.listeners.stdout(data);
+					if (!optionsNonNull.silent && optionsNonNull.outStream) optionsNonNull.outStream.write(data);
+					stdbuffer = this._processLineBuffer(data, stdbuffer, (line) => {
+						if (this.options.listeners && this.options.listeners.stdline) this.options.listeners.stdline(line);
+					});
+				});
+				let errbuffer = "";
+				if (cp.stderr) cp.stderr.on("data", (data) => {
+					state.processStderr = true;
+					if (this.options.listeners && this.options.listeners.stderr) this.options.listeners.stderr(data);
+					if (!optionsNonNull.silent && optionsNonNull.errStream && optionsNonNull.outStream) (optionsNonNull.failOnStdErr ? optionsNonNull.errStream : optionsNonNull.outStream).write(data);
+					errbuffer = this._processLineBuffer(data, errbuffer, (line) => {
+						if (this.options.listeners && this.options.listeners.errline) this.options.listeners.errline(line);
+					});
+				});
+				cp.on("error", (err) => {
+					state.processError = err.message;
+					state.processExited = true;
+					state.processClosed = true;
+					state.CheckComplete();
+				});
+				cp.on("exit", (code) => {
+					state.processExitCode = code;
+					state.processExited = true;
+					this._debug(`Exit code ${code} received from tool '${this.toolPath}'`);
+					state.CheckComplete();
+				});
+				cp.on("close", (code) => {
+					state.processExitCode = code;
+					state.processExited = true;
+					state.processClosed = true;
+					this._debug(`STDIO streams have closed for tool '${this.toolPath}'`);
+					state.CheckComplete();
+				});
+				state.on("done", (error, exitCode) => {
+					if (stdbuffer.length > 0) this.emit("stdline", stdbuffer);
+					if (errbuffer.length > 0) this.emit("errline", errbuffer);
+					cp.removeAllListeners();
+					if (error) reject(error);
+					else resolve(exitCode);
+				});
+				if (this.options.input) {
+					if (!cp.stdin) throw new Error("child process missing stdin");
+					cp.stdin.end(this.options.input);
+				}
+			}));
+		});
+	}
+};
+var ExecState = class ExecState extends events.EventEmitter {
+	constructor(options, toolPath) {
+		super();
+		this.processClosed = false;
+		this.processError = "";
+		this.processExitCode = 0;
+		this.processExited = false;
+		this.processStderr = false;
+		this.delay = 1e4;
+		this.done = false;
+		this.timeout = null;
+		if (!toolPath) throw new Error("toolPath must not be empty");
+		this.options = options;
+		this.toolPath = toolPath;
+		if (options.delay) this.delay = options.delay;
+	}
+	CheckComplete() {
+		if (this.done) return;
+		if (this.processClosed) this._setResult();
+		else if (this.processExited) this.timeout = setTimeout$1(ExecState.HandleTimeout, this.delay, this);
+	}
+	_debug(message) {
+		this.emit("debug", message);
+	}
+	_setResult() {
+		let error;
+		if (this.processExited) {
+			if (this.processError) error = /* @__PURE__ */ new Error(`There was an error when attempting to execute the process '${this.toolPath}'. This may indicate the process failed to start. Error: ${this.processError}`);
+			else if (this.processExitCode !== 0 && !this.options.ignoreReturnCode) error = /* @__PURE__ */ new Error(`The process '${this.toolPath}' failed with exit code ${this.processExitCode}`);
+			else if (this.processStderr && this.options.failOnStdErr) error = /* @__PURE__ */ new Error(`The process '${this.toolPath}' failed because one or more lines were written to the STDERR stream`);
+		}
+		if (this.timeout) {
+			clearTimeout(this.timeout);
+			this.timeout = null;
+		}
+		this.done = true;
+		this.emit("done", error, this.processExitCode);
+	}
+	static HandleTimeout(state) {
+		if (state.done) return;
+		if (!state.processClosed && state.processExited) {
+			const message = `The STDIO streams did not close within ${state.delay / 1e3} seconds of the exit event from process '${state.toolPath}'. This may indicate a child process inherited the STDIO streams and has not yet exited.`;
+			state._debug(message);
+		}
+		state._setResult();
+	}
+};
 
 //#endregion
 //#region node_modules/.pnpm/@actions+exec@3.0.0/node_modules/@actions/exec/lib/exec.js
@@ -19739,7 +20159,10 @@ async function run() {
 	const stableBranchesInput = getInput("stable-branches");
 	const forcePreid = getBooleanInput("force-preid");
 	const forceStable = getBooleanInput("force-stable");
-	if (!version) version = JSON.parse(await readFile("./package.json", "utf8")).version;
+	if (!version) {
+		const repoPkgJson = JSON.parse(await readFile("./package.json", "utf8"));
+		({version} = repoPkgJson);
+	}
 	const baseVersion = stripPreid(version);
 	let fileVersion = baseVersion;
 	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [

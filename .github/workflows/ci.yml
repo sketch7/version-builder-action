@@ -37,7 +37,7 @@ jobs:
 
       - name: Check Format
         id: format-check
-        run: pnpm run format:check
+        run: pnpm run fmt:check
 
       - name: Lint
         id: lint
