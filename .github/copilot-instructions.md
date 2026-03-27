@@ -22,8 +22,8 @@ pnpm run test           # Run unit tests (single pass)
 pnpm run test:watch     # Run tests in watch mode
 pnpm run ci-test        # Run tests with v8 coverage (CI)
 pnpm run lint           # Lint src/ and __tests__/
-pnpm run format:check   # Check formatting with oxfmt
-pnpm run format:write   # Auto-format with oxfmt
+pnpm run fmt   # Auto-format with oxfmt
+pnpm run fmt:check   # Check formatting with oxfmt
 pnpm run all            # format → lint → test → build (full pre-push pipeline)
 ```
 
