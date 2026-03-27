@@ -1,3 +1,5 @@
+// oxlint-disable max-statements
+// oxlint-disable import/prefer-default-export
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { readFile } from "fs/promises";
@@ -26,7 +28,7 @@ export async function run(): Promise<void> {
 
 	if (!version) {
 		const repoPkgJson = JSON.parse(await readFile("./package.json", "utf8"));
-		version = repoPkgJson.version;
+		({ version } = repoPkgJson);
 	}
 	const baseVersion = stripPreid(version);
 	let fileVersion = baseVersion;

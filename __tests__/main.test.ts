@@ -106,8 +106,12 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 		return map[name] ?? "";
 	});
 	vi.mocked(core.getBooleanInput).mockImplementation((name: string) => {
-		if (name === "force-preid") return input.forcePreid === "true";
-		if (name === "force-stable") return input.forceStable === "true";
+		if (name === "force-preid") {
+			return input.forcePreid === "true";
+		}
+		if (name === "force-stable") {
+			return input.forceStable === "true";
+		}
 		return false;
 	});
 

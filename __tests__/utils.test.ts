@@ -308,7 +308,7 @@ describe("stripPreid", () => {
 describe("getCommitCountSinceFileChange", () => {
 	test("returns commit count since file last changed", () => {
 		let call = 0;
-		const execFn = () => (call++ === 0 ? "abc123def\n" : "5\n");
+		const execFn = (): string => (call++ === 0 ? "abc123def\n" : "5\n");
 		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(5);
 	});
 
@@ -318,7 +318,7 @@ describe("getCommitCountSinceFileChange", () => {
 
 	test("returns 0 when HEAD is the version bump commit (count = 0)", () => {
 		let call = 0;
-		const execFn = () => (call++ === 0 ? "abc123def\n" : "0\n");
+		const execFn = (): string => (call++ === 0 ? "abc123def\n" : "0\n");
 		expect(getCommitCountSinceFileChange("package.json", execFn)).toBe(0);
 	});
 
@@ -333,7 +333,7 @@ describe("getCommitCountSinceFileChange", () => {
 	test("includes -G flag in git log command when diffPattern is provided", () => {
 		const commands: string[] = [];
 		let call = 0;
-		const execFn = (cmd: string) => {
+		const execFn = (cmd: string): string => {
 			commands.push(cmd);
 			return call++ === 0 ? "abc123def\n" : "3\n";
 		};
@@ -345,7 +345,7 @@ describe("getCommitCountSinceFileChange", () => {
 	test("omits -G flag when no diffPattern", () => {
 		const commands: string[] = [];
 		let call = 0;
-		const execFn = (cmd: string) => {
+		const execFn = (cmd: string): string => {
 			commands.push(cmd);
 			return call++ === 0 ? "abc123def\n" : "2\n";
 		};
