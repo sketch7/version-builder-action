@@ -3,6 +3,7 @@ import * as github from "@actions/github";
 import { expect, test, vi } from "vitest";
 
 import { run } from "../src/main";
+// oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
 
 vi.mock("@actions/core");
