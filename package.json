@@ -1,6 +1,6 @@
 {
   "name": "@ssv/version-builder-action",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "private": true,
   "keywords": [
     "actions",
@@ -36,20 +36,20 @@
     "all": "pnpm run fmt && pnpm run lint && pnpm run test && pnpm run build"
   },
   "dependencies": {
-    "@actions/core": "^3.0.0",
-    "@actions/github": "^9.0.0"
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
-    "@vitest/coverage-v8": "^4.1.4",
-    "oxfmt": "^0.44.0",
-    "oxlint": "^1.59.0",
-    "tsdown": "^0.21.7",
-    "typescript": "^6.0.2",
-    "vitest": "^4.1.4"
+    "@vitest/coverage-v8": "^4.1.5",
+    "oxfmt": "^0.47.0",
+    "oxlint": "^1.62.0",
+    "tsdown": "^0.21.10",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@10.33.2"
 }

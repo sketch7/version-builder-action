@@ -12,4 +12,9 @@ export default defineConfig({
 	sourcemap: false,
 	outDir: "dist",
 	clean: true,
+	inputOptions: {
+		experimental: {
+			attachDebugInfo: "none",
+		},
+	},
 });
