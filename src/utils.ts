@@ -186,3 +186,65 @@ export function listRemoteBranchNames(execFn: (cmd: string) => string = cmd => e
 		return [];
 	}
 }
+
+/**
+ * Lists all local tag names via `git tag -l`. Assumes tags are already fetched locally
+ * (actions/checkout with fetch-depth: 0 fetches tags by default).
+ * Returns an empty array if git is unavailable.
+ */
+export function listTagNames(execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" })): string[] {
+	try {
+		return execFn("git tag -l")
+			.split("\n")
+			.map(t => t.trim())
+			.filter(Boolean);
+	} catch {
+		return [];
+	}
+}
+
+export type VersionConflictMode = "ignore" | "fail" | "bump-patch";
+
+export interface VersionConflictResult {
+	baseVersion: string;
+	patch: number;
+	bumped: boolean;
+}
+
+/**
+ * Resolves a stable `major.minor.patch` version against existing git tags.
+ * `mode: "ignore"` returns the version unchanged (default, non-breaking).
+ * `mode: "bump-patch"` increments the patch until a free tag is found.
+ * `mode: "fail"` throws when the exact tag already exists.
+ */
+export function resolveVersionConflict(input: {
+	major: number;
+	minor: number;
+	patch: number;
+	tagTmpl: string;
+	mode: VersionConflictMode;
+	existingTags: string[];
+}): VersionConflictResult {
+	const { major, minor, tagTmpl, mode, existingTags } = input;
+	let { patch } = input;
+
+	if (mode === "ignore") {
+		return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: false };
+	}
+
+	const [prefix] = tagTmpl.split("{major}");
+	const tagSet = new Set(existingTags);
+	const exactTag = `${prefix}${major}.${minor}.${patch}`;
+	if (!tagSet.has(exactTag)) {
+		return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: false };
+	}
+
+	if (mode === "fail") {
+		throw new Error(`Tag '${exactTag}' already exists. Bump the version and retry, or use on-version-conflict: bump-patch to auto-increment.`);
+	}
+
+	do {
+		patch++;
+	} while (tagSet.has(`${prefix}${major}.${minor}.${patch}`));
+	return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: true };
+}

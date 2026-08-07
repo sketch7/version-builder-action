@@ -26,33 +26,41 @@ both semver and non-semver variants as outputs.
 - A `tag` output is always emitted: pre-release builds use the preid label
   (e.g. `rc`, `dev`); stable builds emit `latest` for the highest semver
   branch and `v{major}-lts` for older ones (detected via `git ls-remote`).
+- On stable branches, when `on-version-conflict` is not `ignore` (the
+  default), the exact version's git tag is checked before it's emitted:
+  `fail` stops the action if the tag already exists, `bump-patch`
+  auto-increments the patch until a free tag is found. Git tags are the
+  source of truth — nothing is committed back to `package.json`.
 
 ## Inputs
 
 | Input                 | Required | Default                                    | Description                                                                                                                                                            |
 | --------------------- | -------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `version`             | No       | _(reads `package.json`)_                   | Base version to use (e.g. `1.5.6`). Any existing preid suffix is stripped automatically.                                                                               |
+| `package-json-dir`    | No       | _(repo root)_                              | Directory containing `package.json`, for monorepo sub-packages e.g. `apps/client`. Leading/trailing slashes are stripped.                                              |
 | `preid`               | No       | `dev`                                      | Default prerelease identifier used when no branch-specific mapping is defined.                                                                                         |
 | `preid-branches`      | No       | `main:rc,master:rc,develop:dev,vnext:next` | Comma-separated list of branches (with optional `branch:preid` mapping) that trigger preid versioning. Plain name uses the global `preid`.                             |
 | `stable-branches`     | No       | `^v\d+$,^\d+\.x$`                          | Comma-separated regex patterns for branches that are always stable (e.g. `v1`, `2.x`). Any branch not in `preid-branches` and not matching here falls back to `preid`. |
 | `preid-num-delimiter` | No       | `.`                                        | Delimiter between the preid and the counter (e.g. `dev.5` or `dev-5`).                                                                                                 |
 | `force-preid`         | No       | `false`                                    | Forces preid versioning regardless of the current branch.                                                                                                              |
 | `force-stable`        | No       | `false`                                    | Forces stable versioning regardless of the current branch.                                                                                                             |
+| `tag-tmpl`            | No       | `v{major}`                                 | Tag template used to check for an existing version tag when `on-version-conflict` is not `ignore`. `{major}` is replaced with the major version number.                |
+| `on-version-conflict` | No       | `ignore`                                   | Behavior when a stable version's git tag already exists: `ignore` (no check, fully backward compatible), `fail`, or `bump-patch` (auto-increments the patch).          |
 
 ## Outputs
 
-| Output         | Example       | Description                                                                                               |
-| -------------- | ------------- | --------------------------------------------------------------------------------------------------------- |
-| `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable.                                                     |
-| `baseVersion`  | `1.5.6`       | Base version without any pre-release suffix (from the `version` input or `package.json`).                 |
-| `fileVersion`  | `1.5.6.5`     | 4-part numeric version for non-semver consumers (e.g. .NET assembly version); plain version when stable.  |
-| `majorVersion` | `1`           | Major version segment.                                                                                    |
-| `minorVersion` | `5`           | Minor version segment.                                                                                    |
-| `patchVersion` | `6`           | Patch version segment.                                                                                    |
-| `preid`        | `dev`         | The preid string when pre-release, otherwise an empty string.                                             |
-| `preidCounter` | `5`           | The numeric counter appended after the preid (e.g. `5` for `-dev.5`), otherwise an empty string.          |
-| `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                            |
-| `tag`          | `latest`      | Dist-tag for the build: preid label when pre-release (e.g. `rc`), `latest` or `v{major}-lts` when stable. |
+| Output         | Example       | Description                                                                                                                            |
+| -------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable. Patch is bumped when `on-version-conflict: bump-patch` resolved a tag collision. |
+| `baseVersion`  | `1.5.6`       | Base version without any pre-release suffix (from the `version` input or `package.json`).                                              |
+| `fileVersion`  | `1.5.6.5`     | 4-part numeric version for non-semver consumers (e.g. .NET assembly version); plain version when stable.                               |
+| `majorVersion` | `1`           | Major version segment.                                                                                                                 |
+| `minorVersion` | `5`           | Minor version segment.                                                                                                                 |
+| `patchVersion` | `6`           | Patch version segment.                                                                                                                 |
+| `preid`        | `dev`         | The preid string when pre-release, otherwise an empty string.                                                                          |
+| `preidCounter` | `5`           | The numeric counter appended after the preid (e.g. `5` for `-dev.5`), otherwise an empty string.                                       |
+| `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                                                         |
+| `tag`          | `latest`      | Dist-tag for the build: preid label when pre-release (e.g. `rc`), `latest` or `v{major}-lts` when stable.                              |
 
 ## Branch Behavior (defaults)
 
@@ -121,6 +129,29 @@ steps:
   uses: sketch7/version-builder-action@v3
   with:
     stable-branches: "^v\\d+$,^\\d+\\.x$,^hotfix/.*$"
+```
+
+### Guard against re-publishing a stable version
+
+Protects against merging two release branches before a version bump lands —
+otherwise both would resolve to the same stable version and the second
+publish would fail partway through the build. Opt-in; the default
+(`ignore`) never checks tags, so this is fully backward compatible.
+
+```yaml
+- name: Build version
+  uses: sketch7/version-builder-action@v3
+  with:
+    on-version-conflict: "bump-patch" # or "fail" to stop instead of bumping
+```
+
+### Sub-package in a monorepo
+
+```yaml
+- name: Build version
+  uses: sketch7/version-builder-action@v3
+  with:
+    package-json-dir: "apps/client"
 ```
 
 ## Publishing a New Release

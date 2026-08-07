@@ -4,11 +4,13 @@ import {
 	getCommitCountSinceFileChange,
 	isPrerelease,
 	listRemoteBranchNames,
+	listTagNames,
 	matchesBranchPattern,
 	parsePreidBranches,
 	parseBranchVersion,
 	resolvePreid,
 	resolveTag,
+	resolveVersionConflict,
 	stripPreid,
 } from "../src/utils";
 
@@ -375,6 +377,74 @@ describe("listRemoteBranchNames", () => {
 	test("trims and filters blank lines", () => {
 		const output = "abc123\trefs/heads/v2\n\n";
 		expect(listRemoteBranchNames(() => output)).toEqual(["v2"]);
+	});
+});
+
+describe("listTagNames", () => {
+	test("parses tag names from git tag -l output", () => {
+		const output = ["v1.0.0", "v1.0.1", "v2.0.0"].join("\n");
+		expect(listTagNames(() => output)).toEqual(["v1.0.0", "v1.0.1", "v2.0.0"]);
+	});
+
+	test("returns empty array when output is empty", () => {
+		expect(listTagNames(() => "")).toEqual([]);
+	});
+
+	test("returns empty array on git error", () => {
+		expect(
+			listTagNames(() => {
+				throw new Error("not a git repo");
+			}),
+		).toEqual([]);
+	});
+
+	test("trims and filters blank lines", () => {
+		expect(listTagNames(() => "v1.0.0\n\n")).toEqual(["v1.0.0"]);
+	});
+});
+
+describe("resolveVersionConflict", () => {
+	test.each([
+		{
+			name: "ignore mode returns version unchanged even if tag exists",
+			input: { major: 1, minor: 0, patch: 0, tagTmpl: "v{major}", mode: "ignore" as const, existingTags: ["v1.0.0"] },
+			expected: { baseVersion: "1.0.0", patch: 0, bumped: false },
+		},
+		{
+			name: "no conflict returns version unchanged",
+			input: { major: 1, minor: 0, patch: 0, tagTmpl: "v{major}", mode: "fail" as const, existingTags: ["v1.0.1"] },
+			expected: { baseVersion: "1.0.0", patch: 0, bumped: false },
+		},
+		{
+			name: "bump-patch increments once when next patch is free",
+			input: { major: 1, minor: 0, patch: 0, tagTmpl: "v{major}", mode: "bump-patch" as const, existingTags: ["v1.0.0"] },
+			expected: { baseVersion: "1.0.1", patch: 1, bumped: true },
+		},
+		{
+			name: "bump-patch skips over multiple existing tags",
+			input: {
+				major: 1,
+				minor: 0,
+				patch: 0,
+				tagTmpl: "v{major}",
+				mode: "bump-patch" as const,
+				existingTags: ["v1.0.0", "v1.0.1", "v1.0.2"],
+			},
+			expected: { baseVersion: "1.0.3", patch: 3, bumped: true },
+		},
+		{
+			name: "custom tag-tmpl prefix",
+			input: { major: 2, minor: 1, patch: 0, tagTmpl: "release-{major}", mode: "bump-patch" as const, existingTags: ["release-2.1.0"] },
+			expected: { baseVersion: "2.1.1", patch: 1, bumped: true },
+		},
+	])("given $name - should be $expected", ({ input, expected }) => {
+		expect(resolveVersionConflict(input)).toEqual(expected);
+	});
+
+	test("fail mode throws when the exact tag already exists", () => {
+		expect(() => resolveVersionConflict({ major: 1, minor: 0, patch: 0, tagTmpl: "v{major}", mode: "fail", existingTags: ["v1.0.0"] })).toThrow(
+			"Tag 'v1.0.0' already exists",
+		);
 	});
 });
 

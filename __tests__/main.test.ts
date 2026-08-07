@@ -1,8 +1,9 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { run } from "../src/main";
+import { getCommitCountSinceFileChange, listTagNames } from "../src/utils";
 // oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
 
@@ -16,6 +17,7 @@ vi.mock("../src/utils", async importOriginal => {
 		...actual,
 		getCommitCountSinceFileChange: vi.fn().mockReturnValue(0),
 		listRemoteBranchNames: vi.fn().mockReturnValue([]),
+		listTagNames: vi.fn().mockReturnValue([]),
 	};
 });
 
@@ -128,4 +130,94 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 	expect(core.setOutput).toHaveBeenCalledWith("preidCounter", expected.preidCounter);
 	expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", expected.isPrerelease);
 	expect(core.setOutput).toHaveBeenCalledWith("tag", expected.tag);
+});
+
+describe("on-version-conflict", () => {
+	function mockInputs(overrides: { version: string; onVersionConflict?: string; tagTmpl?: string }): void {
+		vi.mocked(github).context = { ref: "refs/heads/v3" } as typeof github.context;
+		vi.mocked(core.getInput).mockImplementation((name: string) => {
+			const map: Record<string, string> = {
+				version: overrides.version,
+				preid: "dev",
+				"preid-branches": "main:rc,master:rc,develop:dev",
+				"stable-branches": "^v\\d+$,^\\d+\\.x$",
+				"preid-num-delimiter": ".",
+				"on-version-conflict": overrides.onVersionConflict ?? "",
+				"tag-tmpl": overrides.tagTmpl ?? "",
+			};
+			return map[name] ?? "";
+		});
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	}
+
+	test("ignore (default) never checks tags, even when the tag already exists", async () => {
+		mockInputs({ version: "3.0.0" });
+		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
+
+		await run();
+
+		expect(listTagNames).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
+		expect(core.setFailed).not.toHaveBeenCalled();
+	});
+
+	test("fail sets a failure message when the tag already exists", async () => {
+		mockInputs({ version: "3.0.0", onVersionConflict: "fail" });
+		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("Tag 'v3.0.0' already exists"));
+	});
+
+	test("fail does not fail when the tag does not exist", async () => {
+		mockInputs({ version: "3.0.0", onVersionConflict: "fail" });
+		vi.mocked(listTagNames).mockReturnValue([]);
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
+	});
+
+	test("bump-patch auto-increments patch and outputs the bumped version", async () => {
+		mockInputs({ version: "3.0.0", onVersionConflict: "bump-patch" });
+		vi.mocked(listTagNames).mockReturnValue(["v3.0.0", "v3.0.1"]);
+
+		await run();
+
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
+		expect(core.setOutput).toHaveBeenCalledWith("baseVersion", "3.0.2");
+		expect(core.setOutput).toHaveBeenCalledWith("patchVersion", "2");
+	});
+});
+
+describe("package-json-dir", () => {
+	function mockInputs(packageJsonDir: string): void {
+		vi.mocked(github).context = { ref: "refs/heads/feature/my-workflow" } as typeof github.context;
+		vi.mocked(core.getInput).mockImplementation((name: string) => {
+			const map: Record<string, string> = {
+				version: "1.0.0",
+				preid: "dev",
+				"preid-branches": "main:rc,master:rc,develop:dev",
+				"stable-branches": "^v\\d+$,^\\d+\\.x$",
+				"preid-num-delimiter": ".",
+				"package-json-dir": packageJsonDir,
+			};
+			return map[name] ?? "";
+		});
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	}
+
+	test.each([
+		{ name: "empty (default) resolves to repo root", packageJsonDir: "", expected: "package.json" },
+		{ name: "plain sub-directory", packageJsonDir: "management/blueprint", expected: "management/blueprint/package.json" },
+		{ name: "leading/trailing slashes are stripped", packageJsonDir: "/management/blueprint/", expected: "management/blueprint/package.json" },
+	])("given $name - uses $expected for commit counting", async ({ packageJsonDir, expected }) => {
+		mockInputs(packageJsonDir);
+
+		await run();
+
+		expect(getCommitCountSinceFileChange).toHaveBeenCalledWith(expected, undefined, '"version":');
+	});
 });
