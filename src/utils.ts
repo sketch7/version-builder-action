@@ -180,7 +180,7 @@ export function listRemoteBranchNames(execFn: (cmd: string) => string = cmd => e
 		const output = execFn("git ls-remote --heads origin");
 		return output
 			.split("\n")
-			.map(line => /refs\/heads\/(.+)$/.exec(line)?.[1]?.trim() ?? null)
+			.map(line => /refs\/heads\/(?<branch>.+)$/.exec(line)?.groups?.branch?.trim() ?? null)
 			.filter((name): name is string => name !== null && name.length > 0);
 	} catch {
 		return [];
