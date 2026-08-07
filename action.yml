@@ -13,6 +13,12 @@ inputs:
     required: false
     description: "Version to be used, if not specified will read from `package.json`."
     # default: "default value if applicable"
+  package-json-dir:
+    required: false
+    description: "Directory containing `package.json`, for monorepo sub-packages
+      e.g. 'apps/client'. Leading/trailing slashes are stripped.
+      Defaults to the repository root."
+    default: ""
   force-preid:
     required: false
     description: "Forces preid versioning even if branch not satisfied."

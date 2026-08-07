@@ -22,6 +22,8 @@ export async function run(): Promise<void> {
 	const branch = github.context.ref.replace("refs/heads/", "");
 
 	let version = core.getInput("version");
+	const packageJsonDir = core.getInput("package-json-dir").replace(/^\/+|\/+$/g, "");
+	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
 	const defaultPreid = core.getInput("preid") || "dev";
 	const preidDelimiter = core.getInput("preid-num-delimiter") || ".";
 	const preidBranchesInput = core.getInput("preid-branches");
@@ -32,7 +34,7 @@ export async function run(): Promise<void> {
 	const tagTmpl = core.getInput("tag-tmpl") || "v{major}";
 
 	if (!version) {
-		const repoPkgJson = JSON.parse(await readFile("./package.json", "utf8"));
+		const repoPkgJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 		({ version } = repoPkgJson);
 	}
 	let baseVersion = stripPreid(version);
@@ -50,7 +52,7 @@ export async function run(): Promise<void> {
 
 	const resolvedPreid = resolvePreid({ branch, preidBranches, stableBranches, defaultPreid, forcePreid, forceStable });
 	const isPreRel = resolvedPreid !== null;
-	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json", undefined, '"version":') : 0;
+	const commitCount = isPreRel ? getCommitCountSinceFileChange(packageJsonPath, undefined, '"version":') : 0;
 	core.info(
 		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
 	);

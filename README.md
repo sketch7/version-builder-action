@@ -37,6 +37,7 @@ both semver and non-semver variants as outputs.
 | Input                 | Required | Default                                    | Description                                                                                                                                                            |
 | --------------------- | -------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `version`             | No       | _(reads `package.json`)_                   | Base version to use (e.g. `1.5.6`). Any existing preid suffix is stripped automatically.                                                                               |
+| `package-json-dir`    | No       | _(repo root)_                              | Directory containing `package.json`, for monorepo sub-packages e.g. `apps/client`. Leading/trailing slashes are stripped.                                              |
 | `preid`               | No       | `dev`                                      | Default prerelease identifier used when no branch-specific mapping is defined.                                                                                         |
 | `preid-branches`      | No       | `main:rc,master:rc,develop:dev,vnext:next` | Comma-separated list of branches (with optional `branch:preid` mapping) that trigger preid versioning. Plain name uses the global `preid`.                             |
 | `stable-branches`     | No       | `^v\d+$,^\d+\.x$`                          | Comma-separated regex patterns for branches that are always stable (e.g. `v1`, `2.x`). Any branch not in `preid-branches` and not matching here falls back to `preid`. |
@@ -142,6 +143,15 @@ publish would fail partway through the build. Opt-in; the default
   uses: sketch7/version-builder-action@v3
   with:
     on-version-conflict: "bump-patch" # or "fail" to stop instead of bumping
+```
+
+### Sub-package in a monorepo
+
+```yaml
+- name: Build version
+  uses: sketch7/version-builder-action@v3
+  with:
+    package-json-dir: "apps/client"
 ```
 
 ## Publishing a New Release

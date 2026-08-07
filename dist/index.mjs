@@ -19985,6 +19985,8 @@ function resolveVersionConflict(input) {
 async function run() {
 	const branch = context.ref.replace("refs/heads/", "");
 	let version = getInput("version");
+	const packageJsonDir = getInput("package-json-dir").replace(/^\/+|\/+$/g, "");
+	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
 	const defaultPreid = getInput("preid") || "dev";
 	const preidDelimiter = getInput("preid-num-delimiter") || ".";
 	const preidBranchesInput = getInput("preid-branches");
@@ -19994,7 +19996,7 @@ async function run() {
 	const onVersionConflict = getInput("on-version-conflict") || "ignore";
 	const tagTmpl = getInput("tag-tmpl") || "v{major}";
 	if (!version) {
-		const repoPkgJson = JSON.parse(await readFile("./package.json", "utf8"));
+		const repoPkgJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 		({version} = repoPkgJson);
 	}
 	let baseVersion = stripPreid(version);
@@ -20019,7 +20021,7 @@ async function run() {
 		forceStable
 	});
 	const isPreRel = resolvedPreid !== null;
-	const commitCount = isPreRel ? getCommitCountSinceFileChange("package.json", void 0, "\"version\":") : 0;
+	const commitCount = isPreRel ? getCommitCountSinceFileChange(packageJsonPath, void 0, "\"version\":") : 0;
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	if (isPreRel) {
 		debug("Use preid for branch");

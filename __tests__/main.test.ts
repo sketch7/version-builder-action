@@ -3,7 +3,7 @@ import * as github from "@actions/github";
 import { describe, expect, test, vi } from "vitest";
 
 import { run } from "../src/main";
-import { listTagNames } from "../src/utils";
+import { getCommitCountSinceFileChange, listTagNames } from "../src/utils";
 // oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
 
@@ -189,5 +189,35 @@ describe("on-version-conflict", () => {
 		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
 		expect(core.setOutput).toHaveBeenCalledWith("baseVersion", "3.0.2");
 		expect(core.setOutput).toHaveBeenCalledWith("patchVersion", "2");
+	});
+});
+
+describe("package-json-dir", () => {
+	function mockInputs(packageJsonDir: string): void {
+		vi.mocked(github).context = { ref: "refs/heads/feature/my-workflow" } as typeof github.context;
+		vi.mocked(core.getInput).mockImplementation((name: string) => {
+			const map: Record<string, string> = {
+				version: "1.0.0",
+				preid: "dev",
+				"preid-branches": "main:rc,master:rc,develop:dev",
+				"stable-branches": "^v\\d+$,^\\d+\\.x$",
+				"preid-num-delimiter": ".",
+				"package-json-dir": packageJsonDir,
+			};
+			return map[name] ?? "";
+		});
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	}
+
+	test.each([
+		{ name: "empty (default) resolves to repo root", packageJsonDir: "", expected: "package.json" },
+		{ name: "plain sub-directory", packageJsonDir: "management/blueprint", expected: "management/blueprint/package.json" },
+		{ name: "leading/trailing slashes are stripped", packageJsonDir: "/management/blueprint/", expected: "management/blueprint/package.json" },
+	])("given $name - uses $expected for commit counting", async ({ packageJsonDir, expected }) => {
+		mockInputs(packageJsonDir);
+
+		await run();
+
+		expect(getCommitCountSinceFileChange).toHaveBeenCalledWith(expected, undefined, '"version":');
 	});
 });
