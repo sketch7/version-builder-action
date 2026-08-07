@@ -19937,6 +19937,50 @@ function listRemoteBranchNames(execFn = (cmd) => execSync(cmd, { encoding: "utf8
 		return [];
 	}
 }
+/**
+* Lists all local tag names via `git tag -l`. Assumes tags are already fetched locally
+* (actions/checkout with fetch-depth: 0 fetches tags by default).
+* Returns an empty array if git is unavailable.
+*/
+function listTagNames(execFn = (cmd) => execSync(cmd, { encoding: "utf8" })) {
+	try {
+		return execFn("git tag -l").split("\n").map((t) => t.trim()).filter(Boolean);
+	} catch {
+		return [];
+	}
+}
+/**
+* Resolves a stable `major.minor.patch` version against existing git tags.
+* `mode: "ignore"` returns the version unchanged (default, non-breaking).
+* `mode: "bump-patch"` increments the patch until a free tag is found.
+* `mode: "fail"` throws when the exact tag already exists.
+*/
+function resolveVersionConflict(input) {
+	const { major, minor, tagTmpl, mode, existingTags } = input;
+	let { patch } = input;
+	if (mode === "ignore") return {
+		baseVersion: `${major}.${minor}.${patch}`,
+		patch,
+		bumped: false
+	};
+	const [prefix] = tagTmpl.split("{major}");
+	const tagSet = new Set(existingTags);
+	const exactTag = `${prefix}${major}.${minor}.${patch}`;
+	if (!tagSet.has(exactTag)) return {
+		baseVersion: `${major}.${minor}.${patch}`,
+		patch,
+		bumped: false
+	};
+	if (mode === "fail") throw new Error(`Tag '${exactTag}' already exists. Bump the version and retry, or use on-version-conflict: bump-patch to auto-increment.`);
+	do
+		patch++;
+	while (tagSet.has(`${prefix}${major}.${minor}.${patch}`));
+	return {
+		baseVersion: `${major}.${minor}.${patch}`,
+		patch,
+		bumped: true
+	};
+}
 
 async function run() {
 	const branch = context.ref.replace("refs/heads/", "");
@@ -19947,11 +19991,13 @@ async function run() {
 	const stableBranchesInput = getInput("stable-branches");
 	const forcePreid = getBooleanInput("force-preid");
 	const forceStable = getBooleanInput("force-stable");
+	const onVersionConflict = getInput("on-version-conflict") || "ignore";
+	const tagTmpl = getInput("tag-tmpl") || "v{major}";
 	if (!version) {
 		const repoPkgJson = JSON.parse(await readFile("./package.json", "utf8"));
 		({version} = repoPkgJson);
 	}
-	const baseVersion = stripPreid(version);
+	let baseVersion = stripPreid(version);
 	let fileVersion = baseVersion;
 	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
 		"main:rc",
@@ -19962,7 +20008,8 @@ async function run() {
 	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
 	let versionSuffix;
 	const versionSegments = baseVersion.split(".");
-	const [major, minor, patch] = versionSegments;
+	const [major, minor, initialPatch] = versionSegments;
+	let patch = initialPatch;
 	const resolvedPreid = resolvePreid({
 		branch,
 		preidBranches,
@@ -19978,6 +20025,25 @@ async function run() {
 		debug("Use preid for branch");
 		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`;
 		if (versionSegments.length === 3) fileVersion = `${baseVersion}.${commitCount}`;
+	} else if (versionSegments.length === 3) try {
+		const result = resolveVersionConflict({
+			major: Number(major),
+			minor: Number(minor),
+			patch: Number(patch),
+			tagTmpl,
+			mode: onVersionConflict,
+			existingTags: onVersionConflict === "ignore" ? [] : listTagNames()
+		});
+		const { baseVersion: bumpedVersion, bumped } = result;
+		if (bumped) {
+			notice(`Version tag conflict for ${baseVersion}. Auto-bumped patch → ${bumpedVersion}`);
+			baseVersion = bumpedVersion;
+			fileVersion = bumpedVersion;
+			patch = String(result.patch);
+		}
+	} catch (err) {
+		setFailed(err.message);
+		return;
 	}
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
 	const preidOutput = isPreRel ? resolvedPreid : "";

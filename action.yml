@@ -44,11 +44,23 @@ inputs:
     required: false
     description: "Delimiter for build number to use when using preid e.g. preid 'dev' with       `.` delimiter be '1.0.0-dev.123' ('dev.123')."
     default: "."
+  tag-tmpl:
+    required: false
+    description: "Tag template used to check for an existing version tag when `on-version-conflict`
+      is not 'ignore'. Use `{major}` as placeholder e.g. 'v{major}' looks for tag 'v1.5.6'."
+    default: "v{major}"
+  on-version-conflict:
+    required: false
+    description: "Behavior when a stable (non-preid) version's git tag already exists:
+      'ignore' (default, no check — fully backward compatible), 'fail', or 'bump-patch'
+      (auto-increments the patch until a free tag is found)."
+    default: "ignore"
 
 # Define your outputs here.
 outputs:
   version:
-    description: "Build version generated e.g. '1.5.6-dev.123'."
+    description: "Build version generated e.g. '1.5.6-dev.123'. Patch is bumped when
+      on-version-conflict: bump-patch resolved a tag collision."
   baseVersion:
     description: "Base version without preid e.g. '1.5.6'."
   fileVersion:
