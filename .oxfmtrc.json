@@ -7,6 +7,7 @@
   "arrowParens": "avoid",
   "bracketSameLine": true,
   "bracketSpacing": true,
+  "sortPackageJson": false,
   "sortImports": {
     "groups": [
       ["side_effect", "builtin", "external"],
@@ -14,7 +15,17 @@
     ],
     "newlinesBetween": true
   },
-  "ignorePatterns": ["dist/**", "coverage/**", "*.lock", "pnpm-lock.yaml"],
+  "ignorePatterns": [
+    "dist/**",
+    "coverage/**",
+    "*.lock",
+    "pnpm-lock.yaml",
+    ".superpowers",
+    ".codebase-memory",
+    ".worktrees",
+    ".agents/skills/*",
+    "!.agents/skills/arcane-*"
+  ],
   "overrides": [
     {
       "files": ["**/*.json", "**/*.jsonc", "**/*.md"],
