@@ -7,9 +7,8 @@ import { readFile } from "fs/promises";
 import {
 	coerceArray,
 	getCommitCountSinceFileChange,
-	listRemoteBranchNames,
+	isLatestStableMajor,
 	listTagNames,
-	matchesBranchPattern,
 	parsePreidBranches,
 	resolvePreid,
 	resolveTag,
@@ -17,6 +16,13 @@ import {
 	stripPreid,
 } from "./utils";
 import type { VersionConflictMode } from "./utils";
+
+function getExistingTags(isPreRel: boolean): string[] {
+	if (isPreRel) {
+		return [];
+	}
+	return listTagNames();
+}
 
 export async function run(): Promise<void> {
 	const branch = github.context.ref.replace("refs/heads/", "");
@@ -52,6 +58,7 @@ export async function run(): Promise<void> {
 
 	const resolvedPreid = resolvePreid({ branch, preidBranches, stableBranches, defaultPreid, forcePreid, forceStable });
 	const isPreRel = resolvedPreid !== null;
+	const existingTags = getExistingTags(isPreRel);
 	const commitCount = isPreRel ? getCommitCountSinceFileChange(packageJsonPath, undefined, '"version":') : 0;
 	core.info(
 		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
@@ -72,7 +79,7 @@ export async function run(): Promise<void> {
 				patch: Number(patch),
 				tagTmpl,
 				mode: onVersionConflict,
-				existingTags: onVersionConflict === "ignore" ? [] : listTagNames(),
+				existingTags: onVersionConflict === "ignore" ? [] : existingTags,
 			});
 			const { baseVersion: bumpedVersion, bumped } = result;
 			if (bumped) {
@@ -90,8 +97,8 @@ export async function run(): Promise<void> {
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
 	const preidOutput = isPreRel ? resolvedPreid : "";
 
-	const stableBranchNames = isPreRel ? [] : listRemoteBranchNames().filter(name => matchesBranchPattern(name, stableBranches));
-	const tag = resolveTag({ resolvedPreid, branch, stableBranchNames });
+	const isLatest = isPreRel ? false : isLatestStableMajor(Number(major), existingTags, tagTmpl);
+	const tag = resolveTag({ resolvedPreid, currentMajor: Number(major), isLatest });
 
 	core.notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
 	core.setOutput("version", buildVersion);
@@ -103,5 +110,6 @@ export async function run(): Promise<void> {
 	core.setOutput("preid", preidOutput);
 	core.setOutput("preidCounter", isPreRel ? commitCount : "");
 	core.setOutput("isPrerelease", isPreRel);
+	core.setOutput("isLatest", isLatest);
 	core.setOutput("tag", tag);
 }

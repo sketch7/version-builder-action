@@ -43,6 +43,7 @@ const dataset = [
 			preid: "dev",
 			preidCounter: 0,
 			isPrerelease: true,
+			isLatest: false,
 			tag: "dev",
 		},
 	},
@@ -67,6 +68,7 @@ const dataset = [
 			preid: "",
 			preidCounter: "",
 			isPrerelease: false,
+			isLatest: true,
 			tag: "latest",
 		},
 	},
@@ -91,6 +93,7 @@ const dataset = [
 			preid: "dev",
 			preidCounter: 0,
 			isPrerelease: true,
+			isLatest: false,
 			tag: "dev",
 		},
 	},
@@ -118,6 +121,10 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 		return false;
 	});
 
+	if (!expected.isPrerelease) {
+		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
+	}
+
 	await run();
 
 	expect(core.setOutput).toHaveBeenCalledWith("version", expected.version);
@@ -129,7 +136,29 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 	expect(core.setOutput).toHaveBeenCalledWith("preid", expected.preid);
 	expect(core.setOutput).toHaveBeenCalledWith("preidCounter", expected.preidCounter);
 	expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", expected.isPrerelease);
+	expect(core.setOutput).toHaveBeenCalledWith("isLatest", expected.isLatest);
 	expect(core.setOutput).toHaveBeenCalledWith("tag", expected.tag);
+});
+
+test("stable versions in an older major use the LTS tag and report isLatest false", async () => {
+	vi.mocked(github).context = { ref: "refs/heads/v3" } as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: "3.0.0",
+			preid: "dev",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	vi.mocked(listTagNames).mockReturnValue(["v3.0.0", "v4.0.0"]);
+
+	await run();
+
+	expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
+	expect(core.setOutput).toHaveBeenCalledWith("tag", "v3-lts");
 });
 
 describe("on-version-conflict", () => {
@@ -150,13 +179,13 @@ describe("on-version-conflict", () => {
 		vi.mocked(core.getBooleanInput).mockReturnValue(false);
 	}
 
-	test("ignore (default) never checks tags, even when the tag already exists", async () => {
+	test("ignore (default) still checks tags for latest detection", async () => {
 		mockInputs({ version: "3.0.0" });
 		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
 
 		await run();
 
-		expect(listTagNames).not.toHaveBeenCalled();
+		expect(listTagNames).toHaveBeenCalledOnce();
 		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
 		expect(core.setFailed).not.toHaveBeenCalled();
 	});

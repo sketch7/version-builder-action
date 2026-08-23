@@ -129,44 +129,45 @@ export function parseBranchVersion(branch: string): number[] | null {
 	return parts.map(Number);
 }
 
-function compareVersionArrays(a: number[], b: number[]): number {
-	const len = Math.max(a.length, b.length);
-	for (let i = 0; i < len; i++) {
-		const diff = (a[i] ?? 0) - (b[i] ?? 0);
-		if (diff !== 0) {
-			return diff;
-		}
+/**
+ * Parses the major version from an exact stable tag matching a major tag template.
+ * Stable tags must contain a complete `major.minor.patch` version with no suffix.
+ */
+export function parseStableTagMajor(tag: string, tagTmpl: string): number | null {
+	const marker = "{major}";
+	const markerIndex = tagTmpl.indexOf(marker);
+	if (markerIndex === -1) {
+		return null;
 	}
-	return 0;
+
+	const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const prefix = escapeRegex(tagTmpl.slice(0, markerIndex));
+	const suffix = escapeRegex(tagTmpl.slice(markerIndex + marker.length));
+	const match = new RegExp(`^${prefix}(\\d+)\\.\\d+\\.\\d+${suffix}$`).exec(tag);
+	return match ? Number(match[1]) : null;
+}
+
+/**
+ * Returns true when the current major is at least as high as every stable major in `tags`.
+ * Prerelease and malformed tags are ignored.
+ */
+export function isLatestStableMajor(currentMajor: number, tags: string[], tagTmpl: string): boolean {
+	return tags.every(tag => {
+		const major = parseStableTagMajor(tag, tagTmpl);
+		return major === null || major <= currentMajor;
+	});
 }
 
 /**
  * Resolves the dist-tag string for the current build.
- * - Pre-release builds → returns the `resolvedPreid` value (e.g. `"rc"`, `"dev"`).
- * - Stable builds → compares the current branch against all detected stable branches;
- *   the branch with the highest semver version emits `"latest"`, all others emit `"v{major}-lts"`.
- *   Falls back to `"latest"` when no branch versions can be parsed.
+ * Pre-release builds use their resolved preid; stable builds use `latest` for the highest
+ * stable major and a version-specific LTS tag otherwise.
  */
-export function resolveTag(input: { resolvedPreid: string | null; branch: string; stableBranchNames: string[] }): string {
+export function resolveTag(input: { resolvedPreid: string | null; currentMajor: number; isLatest: boolean }): string {
 	if (input.resolvedPreid !== null) {
 		return input.resolvedPreid;
 	}
-
-	const versioned = input.stableBranchNames
-		.map(name => ({ name, version: parseBranchVersion(name) }))
-		.filter((e): e is { name: string; version: number[] } => e.version !== null);
-
-	if (versioned.length === 0) {
-		return "latest";
-	}
-
-	const highest = versioned.reduce((best, cur) => (compareVersionArrays(cur.version, best.version) > 0 ? cur : best));
-	const currentVersion = parseBranchVersion(input.branch);
-	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) {
-		return "latest";
-	}
-	const major = currentVersion?.[0];
-	return major !== undefined ? `v${major}-lts` : "latest";
+	return input.isLatest ? "latest" : `v${input.currentMajor}-lts`;
 }
 
 /**
