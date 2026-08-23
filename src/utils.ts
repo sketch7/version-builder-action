@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 
 const CONVENTIONAL_PREFIX = /^(?:feature|feat|fix|hotfix|bugfix|chore|spike)\/+/i;
 
@@ -195,10 +195,13 @@ export function getCommitCountSinceFileChange(
 	}
 }
 
-export function getCommitCountSinceMergeBase(baseRef: string, execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" })): number {
+export function getCommitCountSinceMergeBase(
+	baseRef: string,
+	execFn: (args: string[]) => string = args => execFileSync("git", args, { encoding: "utf8" }),
+): number {
 	try {
-		const mergeBase = execFn(`git merge-base ${baseRef} HEAD`).trim();
-		const count = execFn(`git rev-list --count ${mergeBase}..HEAD`).trim();
+		const mergeBase = execFn(["merge-base", baseRef, "HEAD"]).trim();
+		const count = execFn(["rev-list", "--count", `${mergeBase}..HEAD`]).trim();
 		return parseInt(count, 10) || 0;
 	} catch {
 		return 0;

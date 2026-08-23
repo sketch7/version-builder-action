@@ -30,10 +30,13 @@ both semver and non-semver variants as outputs.
   since that ref's merge base with `HEAD` instead.
 - When stable, the version is emitted unchanged: `1.5.6`
 - A `tag` output is always emitted: pre-release builds use the formatted preid
-  label (e.g. `rc`, `demo-e2e`); stable builds emit `latest` for the highest semver
-  branch and `v{major}-lts` for older ones (detected via `git ls-remote`).
+  label (e.g. `rc`, `demo-e2e`); stable builds emit `latest` when their major is
+  at least every stable major parsed from local tags matching `tag-tmpl`, and
+  `v{major}-lts` otherwise. Only complete stable `major.minor.patch` tags
+  matching the template participate; malformed and prerelease tags are ignored.
 - On stable branches, when `on-version-conflict` is not `ignore` (the
-  default), the exact version's git tag is checked before it's emitted:
+  default), the exact version's local git tag, derived from `tag-tmpl`, is
+  checked before it is emitted:
   `fail` stops the action if the tag already exists, `bump-patch`
   auto-increments the patch until a free tag is found. Git tags are the
   source of truth — nothing is committed back to `package.json`.
@@ -52,7 +55,7 @@ both semver and non-semver variants as outputs.
 | `counter-base-ref`    | No       | _(empty)_                                  | Git ref used to count prerelease commits since its merge base with `HEAD`; when empty, counts since the last `package.json` version change.                            |
 | `force-preid`         | No       | `false`                                    | Forces preid versioning regardless of the current branch.                                                                                                              |
 | `force-stable`        | No       | `false`                                    | Forces stable versioning regardless of the current branch.                                                                                                             |
-| `tag-tmpl`            | No       | `v{major}`                                 | Tag template used to check for an existing version tag when `on-version-conflict` is not `ignore`. `{major}` is replaced with the major version number.                |
+| `tag-tmpl`            | No       | `v{major}`                                 | Template for parsing local stable tags to select `latest` or `v{major}-lts`, and for checking version conflicts. `{major}` is replaced with the major version number.  |
 | `on-version-conflict` | No       | `ignore`                                   | Behavior when a stable version's git tag already exists: `ignore` (no check, fully backward compatible), `fail`, or `bump-patch` (auto-increments the patch).          |
 
 ## Outputs
@@ -69,8 +72,8 @@ both semver and non-semver variants as outputs.
 | `preidCounter` | `5`           | The numeric counter appended after the preid (e.g. `5` for `-dev.5`), otherwise an empty string.                                       |
 | `branchSlug`   | `my-feature`  | Normalized branch slug used by `{branch}` in `preid-template`; empty when the template does not use `{branch}`.                        |
 | `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                                                         |
-| `isLatest`     | `false`       | Whether a stable version belongs to the highest stable major; always `false` for prereleases.                                          |
-| `tag`          | `latest`      | Dist-tag for the build: formatted preid label when pre-release (e.g. `rc`), `latest` or `v{major}-lts` when stable.                    |
+| `isLatest`     | `false`       | Whether a stable version belongs to the highest major parsed from matching local stable tags; always `false` for prereleases.          |
+| `tag`          | `latest`      | Dist-tag for the build: formatted preid label when pre-release (e.g. `rc`), otherwise `latest` or `v{major}-lts` from local tags.      |
 
 ## Branch Behavior (defaults)
 
@@ -141,17 +144,18 @@ to `rc`, and the default template leaves it unqualified.
 ### Stable v1 and v2 releases
 
 The default stable branch patterns treat `v1` and `v2` as stable. A stable
-build never has a preid or counter. The highest stable major emits the `latest`
-tag; an older major emits its LTS tag (for example, `v1-lts` when v2 is newer).
+build never has a preid or counter. Matching local stable tags determine the
+highest major: the current highest emits `latest`; an older major emits its LTS
+tag (for example, `v1-lts` when matching v2 tags exist).
 
 ```yaml
 - name: Build stable v1 or v2 release
   id: version
   uses: sketch7/version-builder-action@v3
   with:
-    version: "1.3.0"
-    # refs/heads/v2 → 1.3.0, tag latest when v2 is the highest stable major.
-    # refs/heads/v1 → 1.3.0, tag v1-lts when a v2 stable tag exists.
+    version: "2.3.0"
+    # refs/heads/v2 → 2.3.0, tag latest when no matching local tag has a higher major.
+    # For refs/heads/v1, set version to 1.3.0; its tag is v1-lts when matching v2 tags exist.
 ```
 
 ### Branch-qualified feature preview

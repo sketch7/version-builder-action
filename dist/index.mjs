@@ -7,7 +7,7 @@ import { constants, existsSync, promises, readFileSync } from "fs";
 import * as path from "path";
 import * as events from "events";
 import * as child from "child_process";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { setTimeout as setTimeout$1 } from "timers";
 import { readFile } from "fs/promises";
 
@@ -19986,9 +19986,17 @@ function getCommitCountSinceFileChange(filePath, execFn = (cmd) => execSync(cmd,
 		return 0;
 	}
 }
-function getCommitCountSinceMergeBase(baseRef, execFn = (cmd) => execSync(cmd, { encoding: "utf8" })) {
+function getCommitCountSinceMergeBase(baseRef, execFn = (args) => execFileSync("git", args, { encoding: "utf8" })) {
 	try {
-		const count = execFn(`git rev-list --count ${execFn(`git merge-base ${baseRef} HEAD`).trim()}..HEAD`).trim();
+		const count = execFn([
+			"rev-list",
+			"--count",
+			`${execFn([
+				"merge-base",
+				baseRef,
+				"HEAD"
+			]).trim()}..HEAD`
+		]).trim();
 		return parseInt(count, 10) || 0;
 	} catch {
 		return 0;

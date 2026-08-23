@@ -381,20 +381,37 @@ describe("getCommitCountSinceFileChange", () => {
 });
 
 describe("getCommitCountSinceMergeBase", () => {
+	test("passes a metacharacter ref as one inert git argument", () => {
+		const calls: string[][] = [];
+		const execFn = (args: string[]): string => {
+			calls.push(args);
+			return calls.length === 1 ? "abc123\n" : "5\n";
+		};
+
+		expect(getCommitCountSinceMergeBase("origin/main; touch injected", execFn)).toBe(5);
+		expect(calls).toEqual([
+			["merge-base", "origin/main; touch injected", "HEAD"],
+			["rev-list", "--count", "abc123..HEAD"],
+		]);
+	});
+
 	test("returns commits since the merge base and uses the merge-base sha", () => {
-		const commands: string[] = [];
-		const execFn = (cmd: string): string => {
-			commands.push(cmd);
+		const commands: string[][] = [];
+		const execFn = (args: string[]): string => {
+			commands.push(args);
 			return commands.length === 1 ? "abc123\n" : "5\n";
 		};
 
 		expect(getCommitCountSinceMergeBase("origin/main", execFn)).toBe(5);
-		expect(commands).toEqual(["git merge-base origin/main HEAD", "git rev-list --count abc123..HEAD"]);
+		expect(commands).toEqual([
+			["merge-base", "origin/main", "HEAD"],
+			["rev-list", "--count", "abc123..HEAD"],
+		]);
 	});
 
 	test.each(["merge-base", "rev-list"])("returns 0 when %s fails", stage => {
 		let call = 0;
-		const execFn = (): string => {
+		const execFn = (_args: string[]): string => {
 			call++;
 			if ((stage === "merge-base" && call === 1) || (stage === "rev-list" && call === 2)) {
 				throw new Error("git failure");
@@ -504,6 +521,7 @@ describe("parseStableTagMajor", () => {
 		["v2.0.0-rc.4", "v{major}", null],
 		["v2", "v{major}", null],
 		["release-3.1.0", "release-{major}", 3],
+		["release+[v2.1.0]", "release+[v{major}]", 2],
 	])("parses stable tag %s", (tag, template, expected) => {
 		expect(parseStableTagMajor(tag, template)).toBe(expected);
 	});
