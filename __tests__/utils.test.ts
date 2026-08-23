@@ -1,20 +1,48 @@
 import { describe, expect, test } from "vitest";
 
 import {
+	formatPreid,
+	getCommitCountSinceMergeBase,
 	getCommitCountSinceFileChange,
 	isPrerelease,
 	listRemoteBranchNames,
 	listTagNames,
 	matchesBranchPattern,
 	parsePreidBranches,
-	parseBranchVersion,
+	parseStableTagMajor,
 	resolvePreid,
 	resolveTag,
 	resolveVersionConflict,
+	sanitizeBranchName,
 	stripPreid,
+	isLatestStableMajor,
 } from "../src/utils";
 
 const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"];
+
+describe("sanitizeBranchName", () => {
+	test.each([
+		["feature/e2e", "e2e"],
+		["feature/invoice/pro", "invoice-pro"],
+		["HOTFIX/Tax Fix", "tax-fix"],
+		["chore///release__proof", "release-proof"],
+		[`feature/${"safe-branch-".repeat(15)}safe-branch`, `${"safe-branch-".repeat(15)}safe-branch`],
+	])("sanitizes %s", (branch, expected) => {
+		expect(sanitizeBranchName(branch)).toBe(expected);
+	});
+
+	test("rejects an empty result", () => {
+		expect(() => sanitizeBranchName("feature/---")).toThrow("usable branch slug");
+	});
+});
+
+test("formats a branch-qualified preid", () => {
+	expect(formatPreid("{preid}-{branch}", "demo", "e2e")).toBe("demo-e2e");
+});
+
+test("formats a dot-separated preid without a branch placeholder", () => {
+	expect(formatPreid("{preid}", "rc.preview", "")).toBe("rc.preview");
+});
 
 describe("isPrerelease", () => {
 	test.each([
@@ -356,6 +384,49 @@ describe("getCommitCountSinceFileChange", () => {
 	});
 });
 
+describe("getCommitCountSinceMergeBase", () => {
+	test("passes a metacharacter ref as one inert git argument", () => {
+		const calls: string[][] = [];
+		const execFn = (args: string[]): string => {
+			calls.push(args);
+			return calls.length === 1 ? "abc123\n" : "5\n";
+		};
+
+		expect(getCommitCountSinceMergeBase("origin/main; touch injected", execFn)).toBe(5);
+		expect(calls).toEqual([
+			["merge-base", "origin/main; touch injected", "HEAD"],
+			["rev-list", "--count", "abc123..HEAD"],
+		]);
+	});
+
+	test("returns commits since the merge base and uses the merge-base sha", () => {
+		const commands: string[][] = [];
+		const execFn = (args: string[]): string => {
+			commands.push(args);
+			return commands.length === 1 ? "abc123\n" : "5\n";
+		};
+
+		expect(getCommitCountSinceMergeBase("origin/main", execFn)).toBe(5);
+		expect(commands).toEqual([
+			["merge-base", "origin/main", "HEAD"],
+			["rev-list", "--count", "abc123..HEAD"],
+		]);
+	});
+
+	test.each(["merge-base", "rev-list"])("returns 0 when %s fails", stage => {
+		let call = 0;
+		const execFn = (_args: string[]): string => {
+			call++;
+			if ((stage === "merge-base" && call === 1) || (stage === "rev-list" && call === 2)) {
+				throw new Error("git failure");
+			}
+			return call === 1 ? "abc123\n" : "5\n";
+		};
+
+		expect(getCommitCountSinceMergeBase("origin/main", execFn)).toBe(0);
+	});
+});
+
 describe("listRemoteBranchNames", () => {
 	test("parses branch names from ls-remote output", () => {
 		const output = ["abc123\trefs/heads/main", "def456\trefs/heads/v1", "ghi789\trefs/heads/2.x"].join("\n");
@@ -446,72 +517,75 @@ describe("resolveVersionConflict", () => {
 			"Tag 'v1.0.0' already exists",
 		);
 	});
+
+	test("fail mode expands a tag-template suffix", () => {
+		expect(() =>
+			resolveVersionConflict({ major: 1, minor: 0, patch: 0, tagTmpl: "v{major}-stable", mode: "fail", existingTags: ["v1.0.0-stable"] }),
+		).toThrow("Tag 'v1.0.0-stable' already exists");
+	});
+
+	test("bump-patch expands a tag-template suffix for every candidate", () => {
+		expect(
+			resolveVersionConflict({
+				major: 1,
+				minor: 0,
+				patch: 0,
+				tagTmpl: "v{major}-stable",
+				mode: "bump-patch",
+				existingTags: ["v1.0.0-stable", "v1.0.1-stable"],
+			}),
+		).toEqual({ baseVersion: "1.0.2", patch: 2, bumped: true });
+	});
 });
 
-describe("parseBranchVersion", () => {
+describe("parseStableTagMajor", () => {
 	test.each([
-		{ name: "v1", branch: "v1", expected: [1] },
-		{ name: "v2", branch: "v2", expected: [2] },
-		{ name: "1.x", branch: "1.x", expected: [1] },
-		{ name: "12.x", branch: "12.x", expected: [12] },
-		{ name: "v3.1", branch: "v3.1", expected: [3, 1] },
-		{ name: "2.3", branch: "2.3", expected: [2, 3] },
-		{ name: "main returns null", branch: "main", expected: null },
-		{ name: "feature/foo returns null", branch: "feature/foo", expected: null },
-		{ name: "develop returns null", branch: "develop", expected: null },
-	])("given $name - should be $expected", ({ branch, expected }) => {
-		expect(parseBranchVersion(branch)).toEqual(expected);
+		["v0.0.0", "v{major}", 0],
+		["v1.2.3", "v{major}", 1],
+		["v02.0.0", "v{major}", null],
+		["v1.02.0", "v{major}", null],
+		["v1.0.03", "v{major}", null],
+		["v2.0.0-rc.4", "v{major}", null],
+		["v2", "v{major}", null],
+		["release-3.1.0", "release-{major}", 3],
+		["release+[v2.1.0]", "release+[v{major}]", 2],
+	])("parses stable tag %s", (tag, template, expected) => {
+		expect(parseStableTagMajor(tag, template)).toBe(expected);
+	});
+});
+
+describe("isLatestStableMajor", () => {
+	test("a future prerelease does not displace the current stable major", () => {
+		expect(isLatestStableMajor(1, ["v1.9.0", "v2.0.0-rc.1"], "v{major}")).toBe(true);
+	});
+
+	test("an older stable major is not latest", () => {
+		expect(isLatestStableMajor(1, ["v1.9.0", "v2.0.0"], "v{major}")).toBe(false);
+	});
+
+	test("selects the highest stable major from more than 100 exact tags", () => {
+		const tags = Array.from({ length: 101 }, (_, index) => `v${index + 1}.0.0`);
+		expect(isLatestStableMajor(101, tags, "v{major}")).toBe(true);
+		expect(isLatestStableMajor(100, tags, "v{major}")).toBe(false);
 	});
 });
 
 describe("resolveTag", () => {
 	test.each([
-		// --- pre-release → returns preid ---
 		{
-			name: "pre-release branch returns preid rc",
-			input: { resolvedPreid: "rc", branch: "main", stableBranchNames: [] },
+			name: "pre-release returns preid",
+			input: { resolvedPreid: "rc", currentMajor: 1, isLatest: false },
 			expected: "rc",
 		},
 		{
-			name: "pre-release branch returns preid dev",
-			input: { resolvedPreid: "dev", branch: "feature/foo", stableBranchNames: [] },
-			expected: "dev",
-		},
-		// --- stable → latest detection ---
-		{
-			name: "single stable branch returns latest",
-			input: { resolvedPreid: null, branch: "v2", stableBranchNames: ["v2"] },
+			name: "latest stable returns latest",
+			input: { resolvedPreid: null, currentMajor: 2, isLatest: true },
 			expected: "latest",
 		},
 		{
-			name: "highest of multiple stable branches returns latest",
-			input: { resolvedPreid: null, branch: "v2", stableBranchNames: ["v1", "v2"] },
-			expected: "latest",
-		},
-		{
-			name: "lower stable branch returns v1-lts",
-			input: { resolvedPreid: null, branch: "v1", stableBranchNames: ["v1", "v2"] },
+			name: "older stable returns major lts tag",
+			input: { resolvedPreid: null, currentMajor: 1, isLatest: false },
 			expected: "v1-lts",
-		},
-		{
-			name: "1.x style — highest returns latest",
-			input: { resolvedPreid: null, branch: "2.x", stableBranchNames: ["1.x", "2.x"] },
-			expected: "latest",
-		},
-		{
-			name: "1.x style — lower returns v1-lts",
-			input: { resolvedPreid: null, branch: "1.x", stableBranchNames: ["1.x", "2.x"] },
-			expected: "v1-lts",
-		},
-		{
-			name: "no parseable branch names falls back to latest",
-			input: { resolvedPreid: null, branch: "hotfix/1.0", stableBranchNames: [] },
-			expected: "latest",
-		},
-		{
-			name: "single un-parseable stable branch falls back to latest",
-			input: { resolvedPreid: null, branch: "hotfix/1.0", stableBranchNames: ["hotfix/1.0"] },
-			expected: "latest",
 		},
 	])("given $name - should be $expected", ({ input, expected }) => {
 		expect(resolveTag(input)).toBe(expected);

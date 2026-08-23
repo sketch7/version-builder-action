@@ -3,7 +3,7 @@ import * as github from "@actions/github";
 import { describe, expect, test, vi } from "vitest";
 
 import { run } from "../src/main";
-import { getCommitCountSinceFileChange, listTagNames } from "../src/utils";
+import { getCommitCountSinceFileChange, getCommitCountSinceMergeBase, listTagNames } from "../src/utils";
 // oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
 
@@ -16,6 +16,7 @@ vi.mock("../src/utils", async importOriginal => {
 	return {
 		...actual,
 		getCommitCountSinceFileChange: vi.fn().mockReturnValue(0),
+		getCommitCountSinceMergeBase: vi.fn().mockReturnValue(0),
 		listRemoteBranchNames: vi.fn().mockReturnValue([]),
 		listTagNames: vi.fn().mockReturnValue([]),
 	};
@@ -43,6 +44,7 @@ const dataset = [
 			preid: "dev",
 			preidCounter: 0,
 			isPrerelease: true,
+			isLatest: false,
 			tag: "dev",
 		},
 	},
@@ -67,6 +69,7 @@ const dataset = [
 			preid: "",
 			preidCounter: "",
 			isPrerelease: false,
+			isLatest: true,
 			tag: "latest",
 		},
 	},
@@ -91,6 +94,7 @@ const dataset = [
 			preid: "dev",
 			preidCounter: 0,
 			isPrerelease: true,
+			isLatest: false,
 			tag: "dev",
 		},
 	},
@@ -118,6 +122,10 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 		return false;
 	});
 
+	if (!expected.isPrerelease) {
+		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
+	}
+
 	await run();
 
 	expect(core.setOutput).toHaveBeenCalledWith("version", expected.version);
@@ -129,7 +137,94 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 	expect(core.setOutput).toHaveBeenCalledWith("preid", expected.preid);
 	expect(core.setOutput).toHaveBeenCalledWith("preidCounter", expected.preidCounter);
 	expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", expected.isPrerelease);
+	expect(core.setOutput).toHaveBeenCalledWith("isLatest", expected.isLatest);
 	expect(core.setOutput).toHaveBeenCalledWith("tag", expected.tag);
+});
+
+test("preview templates use the branch slug and merge-base counter", async () => {
+	vi.mocked(github).context = { ref: "refs/heads/feature/e2e" } as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: "1.3.0",
+			preid: "demo",
+			"preid-template": "{preid}-{branch}",
+			"counter-base-ref": "origin/main",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	vi.mocked(getCommitCountSinceMergeBase).mockReturnValue(1);
+
+	await run();
+
+	expect(core.setOutput).toHaveBeenCalledWith("version", "1.3.0-demo-e2e.1");
+	expect(core.setOutput).toHaveBeenCalledWith("preid", "demo-e2e");
+	expect(core.setOutput).toHaveBeenCalledWith("branchSlug", "e2e");
+	expect(core.setOutput).toHaveBeenCalledWith("preidCounter", 1);
+});
+
+test("stable versions in an older major use the LTS tag and report isLatest false", async () => {
+	vi.mocked(github).context = { ref: "refs/heads/v3" } as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: "3.0.0",
+			preid: "dev",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	vi.mocked(listTagNames).mockReturnValue(["v3.0.0", "v4.0.0"]);
+
+	await run();
+
+	expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
+	expect(core.setOutput).toHaveBeenCalledWith("tag", "v3-lts");
+});
+
+describe("prerelease suffix validation", () => {
+	function mockInputs(preid: string, preidDelimiter: string): void {
+		vi.mocked(github).context = { ref: "refs/heads/feature/my-workflow" } as typeof github.context;
+		vi.mocked(core.getInput).mockImplementation((name: string) => {
+			const map: Record<string, string> = {
+				version: "1.0.0",
+				preid,
+				"preid-branches": "main:rc,master:rc,develop:dev",
+				"stable-branches": "^v\\d+$,^\\d+\\.x$",
+				"preid-num-delimiter": preidDelimiter,
+			};
+			return map[name] ?? "";
+		});
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	}
+
+	test("preserves dot-separated preids with the default template", async () => {
+		mockInputs("rc.preview", ".");
+
+		await run();
+
+		expect(core.setOutput).toHaveBeenCalledWith("version", "1.0.0-rc.preview.0");
+		expect(core.setOutput).toHaveBeenCalledWith("preid", "rc.preview");
+	});
+
+	test("rejects a leading-zero numeric prerelease identifier", async () => {
+		mockInputs("01", ".");
+
+		await expect(run()).rejects.toThrow("Invalid prerelease suffix '01.0'");
+	});
+
+	test("permits a leading zero when a hyphen delimiter makes the identifier nonnumeric", async () => {
+		mockInputs("01", "-");
+
+		await run();
+
+		expect(core.setOutput).toHaveBeenCalledWith("version", "1.0.0-01-0");
+	});
 });
 
 describe("on-version-conflict", () => {
@@ -150,13 +245,13 @@ describe("on-version-conflict", () => {
 		vi.mocked(core.getBooleanInput).mockReturnValue(false);
 	}
 
-	test("ignore (default) never checks tags, even when the tag already exists", async () => {
+	test("ignore (default) still checks tags for latest detection", async () => {
 		mockInputs({ version: "3.0.0" });
 		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
 
 		await run();
 
-		expect(listTagNames).not.toHaveBeenCalled();
+		expect(listTagNames).toHaveBeenCalledOnce();
 		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
 		expect(core.setFailed).not.toHaveBeenCalled();
 	});

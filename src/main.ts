@@ -6,17 +6,42 @@ import { readFile } from "fs/promises";
 
 import {
 	coerceArray,
+	formatPreid,
 	getCommitCountSinceFileChange,
-	listRemoteBranchNames,
+	getCommitCountSinceMergeBase,
+	isLatestStableMajor,
 	listTagNames,
-	matchesBranchPattern,
 	parsePreidBranches,
 	resolvePreid,
 	resolveTag,
 	resolveVersionConflict,
+	sanitizeBranchName,
 	stripPreid,
+	validatePrereleaseSuffix,
 } from "./utils";
 import type { VersionConflictMode } from "./utils";
+
+function getExistingTags(isPreRel: boolean): string[] {
+	if (isPreRel) {
+		return [];
+	}
+	return listTagNames();
+}
+
+function getBranchSlug(preidTemplate: string, branch: string): string {
+	return preidTemplate.includes("{branch}") ? sanitizeBranchName(branch) : "";
+}
+
+function getFormattedPreid(preidTemplate: string, resolvedPreid: string | null, branchSlug: string): string | null {
+	return resolvedPreid === null ? null : formatPreid(preidTemplate, resolvedPreid, branchSlug);
+}
+
+function getPreidCounter(isPreRel: boolean, counterBaseRef: string, packageJsonPath: string): number {
+	if (!isPreRel) {
+		return 0;
+	}
+	return counterBaseRef ? getCommitCountSinceMergeBase(counterBaseRef) : getCommitCountSinceFileChange(packageJsonPath, undefined, '"version":');
+}
 
 export async function run(): Promise<void> {
 	const branch = github.context.ref.replace("refs/heads/", "");
@@ -26,6 +51,8 @@ export async function run(): Promise<void> {
 	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
 	const defaultPreid = core.getInput("preid") || "dev";
 	const preidDelimiter = core.getInput("preid-num-delimiter") || ".";
+	const preidTemplate = core.getInput("preid-template") || "{preid}";
+	const counterBaseRef = core.getInput("counter-base-ref");
 	const preidBranchesInput = core.getInput("preid-branches");
 	const stableBranchesInput = core.getInput("stable-branches");
 	const forcePreid = core.getBooleanInput("force-preid");
@@ -52,14 +79,19 @@ export async function run(): Promise<void> {
 
 	const resolvedPreid = resolvePreid({ branch, preidBranches, stableBranches, defaultPreid, forcePreid, forceStable });
 	const isPreRel = resolvedPreid !== null;
-	const commitCount = isPreRel ? getCommitCountSinceFileChange(packageJsonPath, undefined, '"version":') : 0;
+	const branchSlug = getBranchSlug(preidTemplate, branch);
+	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
+	const existingTags = getExistingTags(isPreRel);
+	const commitCount = getPreidCounter(isPreRel, counterBaseRef, packageJsonPath);
 	core.info(
 		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
 	);
 
 	if (isPreRel) {
 		core.debug("Use preid for branch");
-		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`;
+		const prereleaseSuffix = `${formattedPreid}${preidDelimiter}${commitCount}`;
+		validatePrereleaseSuffix(prereleaseSuffix);
+		versionSuffix = prereleaseSuffix;
 
 		if (versionSegments.length === 3) {
 			fileVersion = `${baseVersion}.${commitCount}`;
@@ -72,7 +104,7 @@ export async function run(): Promise<void> {
 				patch: Number(patch),
 				tagTmpl,
 				mode: onVersionConflict,
-				existingTags: onVersionConflict === "ignore" ? [] : listTagNames(),
+				existingTags: onVersionConflict === "ignore" ? [] : existingTags,
 			});
 			const { baseVersion: bumpedVersion, bumped } = result;
 			if (bumped) {
@@ -88,10 +120,10 @@ export async function run(): Promise<void> {
 	}
 
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
-	const preidOutput = isPreRel ? resolvedPreid : "";
+	const preidOutput = formattedPreid ?? "";
 
-	const stableBranchNames = isPreRel ? [] : listRemoteBranchNames().filter(name => matchesBranchPattern(name, stableBranches));
-	const tag = resolveTag({ resolvedPreid, branch, stableBranchNames });
+	const isLatest = isPreRel ? false : isLatestStableMajor(Number(major), existingTags, tagTmpl);
+	const tag = resolveTag({ resolvedPreid: formattedPreid, currentMajor: Number(major), isLatest });
 
 	core.notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
 	core.setOutput("version", buildVersion);
@@ -102,6 +134,8 @@ export async function run(): Promise<void> {
 	core.setOutput("patchVersion", patch);
 	core.setOutput("preid", preidOutput);
 	core.setOutput("preidCounter", isPreRel ? commitCount : "");
+	core.setOutput("branchSlug", branchSlug);
 	core.setOutput("isPrerelease", isPreRel);
+	core.setOutput("isLatest", isLatest);
 	core.setOutput("tag", tag);
 }

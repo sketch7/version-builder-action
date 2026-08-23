@@ -7,7 +7,7 @@ import { constants, existsSync, promises, readFileSync } from "fs";
 import * as path from "path";
 import * as events from "events";
 import * as child from "child_process";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { setTimeout as setTimeout$1 } from "timers";
 import { readFile } from "fs/promises";
 
@@ -19875,6 +19875,18 @@ const GitHub = Octokit.plugin(restEndpointMethods, paginateRest).defaults(defaul
 
 const context = new Context();
 
+const CONVENTIONAL_PREFIX = /^(?:feature|feat|fix|hotfix|bugfix|chore|spike)\/+/i;
+function sanitizeBranchName(branch) {
+	const slug = branch.replace(CONVENTIONAL_PREFIX, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+	if (!slug) throw new Error(`Branch '${branch}' does not produce a usable branch slug`);
+	return slug;
+}
+function formatPreid(template, preid, branchSlug) {
+	return template.replaceAll("{preid}", preid).replaceAll("{branch}", branchSlug);
+}
+function validatePrereleaseSuffix(suffix) {
+	if (!suffix.split(".").every((identifier) => /^[0-9A-Za-z-]+$/.test(identifier) && (!/^\d+$/.test(identifier) || /^(?:0|[1-9]\d*)$/.test(identifier)))) throw new Error(`Invalid prerelease suffix '${suffix}'`);
+}
 function coerceArray(value) {
 	return Array.isArray(value) ? value : [value];
 }
@@ -19927,46 +19939,37 @@ function stripPreid(version) {
 	return idx === -1 ? version : version.slice(0, idx);
 }
 /**
-* Parses a stable branch name into a numeric version array for comparison.
-* Strips a leading `v` and treats `.x` as a terminal segment (dropped).
-* Returns `null` when no numeric version can be parsed.
-* e.g. `"v1"` → `[1]`, `"2.x"` → `[2]`, `"v3.1"` → `[3, 1]`, `"main"` → `null`.
+* Parses the major version from an exact stable tag matching a major tag template.
+* Stable tags must contain a complete `major.minor.patch` version with no suffix.
 */
-function parseBranchVersion(branch) {
-	let normalized = branch.startsWith("v") ? branch.slice(1) : branch;
-	normalized = normalized.replace(/\.x$/, "");
-	if (!normalized) return null;
-	const parts = normalized.split(".");
-	if (parts.some((p) => p === "" || !/^\d+$/.test(p))) return null;
-	return parts.map(Number);
+function parseStableTagMajor(tag, tagTmpl) {
+	const markerIndex = tagTmpl.indexOf("{major}");
+	if (markerIndex === -1) return null;
+	const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const prefix = escapeRegex(tagTmpl.slice(0, markerIndex));
+	const suffix = escapeRegex(tagTmpl.slice(markerIndex + 7));
+	const numericIdentifier = "(?:0|[1-9]\\d*)";
+	const match = new RegExp(`^${prefix}(${numericIdentifier})\\.${numericIdentifier}\\.${numericIdentifier}${suffix}$`).exec(tag);
+	return match ? Number(match[1]) : null;
 }
-function compareVersionArrays(a, b) {
-	const len = Math.max(a.length, b.length);
-	for (let i = 0; i < len; i++) {
-		const diff = (a[i] ?? 0) - (b[i] ?? 0);
-		if (diff !== 0) return diff;
-	}
-	return 0;
+/**
+* Returns true when the current major is at least as high as every stable major in `tags`.
+* Prerelease and malformed tags are ignored.
+*/
+function isLatestStableMajor(currentMajor, tags, tagTmpl) {
+	return tags.every((tag) => {
+		const major = parseStableTagMajor(tag, tagTmpl);
+		return major === null || major <= currentMajor;
+	});
 }
 /**
 * Resolves the dist-tag string for the current build.
-* - Pre-release builds → returns the `resolvedPreid` value (e.g. `"rc"`, `"dev"`).
-* - Stable builds → compares the current branch against all detected stable branches;
-*   the branch with the highest semver version emits `"latest"`, all others emit `"v{major}-lts"`.
-*   Falls back to `"latest"` when no branch versions can be parsed.
+* Pre-release builds use their resolved preid; stable builds use `latest` for the highest
+* stable major and a version-specific LTS tag otherwise.
 */
 function resolveTag(input) {
 	if (input.resolvedPreid !== null) return input.resolvedPreid;
-	const versioned = input.stableBranchNames.map((name) => ({
-		name,
-		version: parseBranchVersion(name)
-	})).filter((e) => e.version !== null);
-	if (versioned.length === 0) return "latest";
-	const highest = versioned.reduce((best, cur) => compareVersionArrays(cur.version, best.version) > 0 ? cur : best);
-	const currentVersion = parseBranchVersion(input.branch);
-	if (currentVersion !== null && compareVersionArrays(currentVersion, highest.version) === 0) return "latest";
-	const major = currentVersion?.[0];
-	return major !== void 0 ? `v${major}-lts` : "latest";
+	return input.isLatest ? "latest" : `v${input.currentMajor}-lts`;
 }
 /**
 * Counts commits on HEAD since the last commit that touched `filePath`.
@@ -19985,15 +19988,20 @@ function getCommitCountSinceFileChange(filePath, execFn = (cmd) => execSync(cmd,
 		return 0;
 	}
 }
-/**
-* Lists all remote branch names from `origin` via `git ls-remote --heads origin`.
-* Returns an empty array if git is unavailable or the remote cannot be reached.
-*/
-function listRemoteBranchNames(execFn = (cmd) => execSync(cmd, { encoding: "utf8" })) {
+function getCommitCountSinceMergeBase(baseRef, execFn = (args) => execFileSync("git", args, { encoding: "utf8" })) {
 	try {
-		return execFn("git ls-remote --heads origin").split("\n").map((line) => /refs\/heads\/(?<branch>.+)$/.exec(line)?.groups?.branch?.trim() ?? null).filter((name) => name !== null && name.length > 0);
+		const count = execFn([
+			"rev-list",
+			"--count",
+			`${execFn([
+				"merge-base",
+				baseRef,
+				"HEAD"
+			]).trim()}..HEAD`
+		]).trim();
+		return parseInt(count, 10) || 0;
 	} catch {
-		return [];
+		return 0;
 	}
 }
 /**
@@ -20007,6 +20015,12 @@ function listTagNames(execFn = (cmd) => execSync(cmd, { encoding: "utf8" })) {
 	} catch {
 		return [];
 	}
+}
+function formatStableTag(tagTmpl, version) {
+	const markerIndex = tagTmpl.indexOf("{major}");
+	const versionText = `${version.major}.${version.minor}.${version.patch}`;
+	if (markerIndex === -1) return `${tagTmpl}${versionText}`;
+	return `${tagTmpl.slice(0, markerIndex)}${versionText}${tagTmpl.slice(markerIndex + 7)}`;
 }
 /**
 * Resolves a stable `major.minor.patch` version against existing git tags.
@@ -20022,9 +20036,12 @@ function resolveVersionConflict(input) {
 		patch,
 		bumped: false
 	};
-	const [prefix] = tagTmpl.split("{major}");
 	const tagSet = new Set(existingTags);
-	const exactTag = `${prefix}${major}.${minor}.${patch}`;
+	const exactTag = formatStableTag(tagTmpl, {
+		major,
+		minor,
+		patch
+	});
 	if (!tagSet.has(exactTag)) return {
 		baseVersion: `${major}.${minor}.${patch}`,
 		patch,
@@ -20033,7 +20050,11 @@ function resolveVersionConflict(input) {
 	if (mode === "fail") throw new Error(`Tag '${exactTag}' already exists. Bump the version and retry, or use on-version-conflict: bump-patch to auto-increment.`);
 	do
 		patch++;
-	while (tagSet.has(`${prefix}${major}.${minor}.${patch}`));
+	while (tagSet.has(formatStableTag(tagTmpl, {
+		major,
+		minor,
+		patch
+	})));
 	return {
 		baseVersion: `${major}.${minor}.${patch}`,
 		patch,
@@ -20041,6 +20062,20 @@ function resolveVersionConflict(input) {
 	};
 }
 
+function getExistingTags(isPreRel) {
+	if (isPreRel) return [];
+	return listTagNames();
+}
+function getBranchSlug(preidTemplate, branch) {
+	return preidTemplate.includes("{branch}") ? sanitizeBranchName(branch) : "";
+}
+function getFormattedPreid(preidTemplate, resolvedPreid, branchSlug) {
+	return resolvedPreid === null ? null : formatPreid(preidTemplate, resolvedPreid, branchSlug);
+}
+function getPreidCounter(isPreRel, counterBaseRef, packageJsonPath) {
+	if (!isPreRel) return 0;
+	return counterBaseRef ? getCommitCountSinceMergeBase(counterBaseRef) : getCommitCountSinceFileChange(packageJsonPath, void 0, "\"version\":");
+}
 async function run() {
 	const branch = context.ref.replace("refs/heads/", "");
 	let version = getInput("version");
@@ -20048,6 +20083,8 @@ async function run() {
 	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
 	const defaultPreid = getInput("preid") || "dev";
 	const preidDelimiter = getInput("preid-num-delimiter") || ".";
+	const preidTemplate = getInput("preid-template") || "{preid}";
+	const counterBaseRef = getInput("counter-base-ref");
 	const preidBranchesInput = getInput("preid-branches");
 	const stableBranchesInput = getInput("stable-branches");
 	const forcePreid = getBooleanInput("force-preid");
@@ -20080,11 +20117,16 @@ async function run() {
 		forceStable
 	});
 	const isPreRel = resolvedPreid !== null;
-	const commitCount = isPreRel ? getCommitCountSinceFileChange(packageJsonPath, void 0, "\"version\":") : 0;
+	const branchSlug = getBranchSlug(preidTemplate, branch);
+	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
+	const existingTags = getExistingTags(isPreRel);
+	const commitCount = getPreidCounter(isPreRel, counterBaseRef, packageJsonPath);
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	if (isPreRel) {
 		debug("Use preid for branch");
-		versionSuffix = `${resolvedPreid}${preidDelimiter}${commitCount}`;
+		const prereleaseSuffix = `${formattedPreid}${preidDelimiter}${commitCount}`;
+		validatePrereleaseSuffix(prereleaseSuffix);
+		versionSuffix = prereleaseSuffix;
 		if (versionSegments.length === 3) fileVersion = `${baseVersion}.${commitCount}`;
 	} else if (versionSegments.length === 3) try {
 		const result = resolveVersionConflict({
@@ -20093,7 +20135,7 @@ async function run() {
 			patch: Number(patch),
 			tagTmpl,
 			mode: onVersionConflict,
-			existingTags: onVersionConflict === "ignore" ? [] : listTagNames()
+			existingTags: onVersionConflict === "ignore" ? [] : existingTags
 		});
 		const { baseVersion: bumpedVersion, bumped } = result;
 		if (bumped) {
@@ -20107,12 +20149,12 @@ async function run() {
 		return;
 	}
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
-	const preidOutput = isPreRel ? resolvedPreid : "";
-	const stableBranchNames = isPreRel ? [] : listRemoteBranchNames().filter((name) => matchesBranchPattern(name, stableBranches));
+	const preidOutput = formattedPreid ?? "";
+	const isLatest = isPreRel ? false : isLatestStableMajor(Number(major), existingTags, tagTmpl);
 	const tag = resolveTag({
-		resolvedPreid,
-		branch,
-		stableBranchNames
+		resolvedPreid: formattedPreid,
+		currentMajor: Number(major),
+		isLatest
 	});
 	notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);
@@ -20123,7 +20165,9 @@ async function run() {
 	setOutput("patchVersion", patch);
 	setOutput("preid", preidOutput);
 	setOutput("preidCounter", isPreRel ? commitCount : "");
+	setOutput("branchSlug", branchSlug);
 	setOutput("isPrerelease", isPreRel);
+	setOutput("isLatest", isLatest);
 	setOutput("tag", tag);
 }
 
