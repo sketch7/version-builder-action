@@ -3,7 +3,7 @@ import * as github from "@actions/github";
 import { describe, expect, test, vi } from "vitest";
 
 import { run } from "../src/main";
-import { getCommitCountSinceFileChange, listTagNames } from "../src/utils";
+import { getCommitCountSinceFileChange, getCommitCountSinceMergeBase, listTagNames } from "../src/utils";
 // oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
 
@@ -16,6 +16,7 @@ vi.mock("../src/utils", async importOriginal => {
 	return {
 		...actual,
 		getCommitCountSinceFileChange: vi.fn().mockReturnValue(0),
+		getCommitCountSinceMergeBase: vi.fn().mockReturnValue(0),
 		listRemoteBranchNames: vi.fn().mockReturnValue([]),
 		listTagNames: vi.fn().mockReturnValue([]),
 	};
@@ -138,6 +139,31 @@ test.each(dataset)("given $name - outputs should match expected", async ({ input
 	expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", expected.isPrerelease);
 	expect(core.setOutput).toHaveBeenCalledWith("isLatest", expected.isLatest);
 	expect(core.setOutput).toHaveBeenCalledWith("tag", expected.tag);
+});
+
+test("preview templates use the branch slug and merge-base counter", async () => {
+	vi.mocked(github).context = { ref: "refs/heads/feature/e2e" } as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: "1.3.0",
+			preid: "demo",
+			"preid-template": "{preid}-{branch}",
+			"counter-base-ref": "origin/main",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	vi.mocked(getCommitCountSinceMergeBase).mockReturnValue(1);
+
+	await run();
+
+	expect(core.setOutput).toHaveBeenCalledWith("version", "1.3.0-demo-e2e.1");
+	expect(core.setOutput).toHaveBeenCalledWith("preid", "demo-e2e");
+	expect(core.setOutput).toHaveBeenCalledWith("branchSlug", "e2e");
+	expect(core.setOutput).toHaveBeenCalledWith("preidCounter", 1);
 });
 
 test("stable versions in an older major use the LTS tag and report isLatest false", async () => {

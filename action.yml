@@ -46,10 +46,20 @@ inputs:
     description: "Version preid to append e.g. 'dev', if not specified will read from
       `package.json` or generated via branch name."
     # default: "default value if applicable"
+  preid-template:
+    required: false
+    description: "Template for the resolved prerelease identifier. Supports `{preid}` and
+      `{branch}`; `{branch}` is a normalized branch slug."
+    default: "{preid}"
   preid-num-delimiter:
     required: false
     description: "Delimiter for build number to use when using preid e.g. preid 'dev' with       `.` delimiter be '1.0.0-dev.123' ('dev.123')."
     default: "."
+  counter-base-ref:
+    required: false
+    description: "Optional git ref used to count prerelease commits since its merge base with
+      HEAD. When empty, counts commits since the last package.json version change."
+    default: ""
   tag-tmpl:
     required: false
     description: "Tag template used to check for an existing version tag when `on-version-conflict`
@@ -81,9 +91,13 @@ outputs:
     description: "Returns the preid e.g. 'dev' based on preid, when isPrerelease else empty string."
   preidCounter:
     description: "Returns the preid counter number e.g. '2' for '-rc.2', when isPrerelease else empty string."
+  branchSlug:
+    description: "Returns the normalized branch slug used by `{branch}` in preid-template, or an empty string when the template does not use `{branch}`."
   isPrerelease:
     description: "Returns whether the version is a prerelease version e.g. 'true' or
       'false'."
+  isLatest:
+    description: "Returns whether a stable version belongs to the highest stable major version e.g. 'true' or 'false'. Always 'false' for prereleases."
   tag:
     description: "Returns the dist-tag for the build e.g. 'latest', 'rc', 'dev', 'v1-lts'."
 
