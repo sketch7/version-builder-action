@@ -1,5 +1,28 @@
 import { execSync } from "child_process";
 
+const CONVENTIONAL_PREFIX = /^(?:feature|feat|fix|hotfix|bugfix|chore|spike)\/+/i;
+
+export function sanitizeBranchName(branch: string): string {
+	const slug = branch
+		.replace(CONVENTIONAL_PREFIX, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9-]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "");
+	if (!slug) {
+		throw new Error(`Branch '${branch}' does not produce a usable branch slug`);
+	}
+	return slug;
+}
+
+export function formatPreid(template: string, preid: string, branchSlug: string): string {
+	const value = template.replaceAll("{preid}", preid).replaceAll("{branch}", branchSlug);
+	if (!/^[0-9A-Za-z-]+$/.test(value)) {
+		throw new Error(`Invalid formatted preid '${value}'`);
+	}
+	return value;
+}
+
 export function coerceArray<T>(value: T | T[]): T[] {
 	return Array.isArray(value) ? value : [value];
 }
@@ -165,6 +188,16 @@ export function getCommitCountSinceFileChange(
 			return 0;
 		}
 		const count = execFn(`git rev-list --count ${sha}..HEAD`).trim();
+		return parseInt(count, 10) || 0;
+	} catch {
+		return 0;
+	}
+}
+
+export function getCommitCountSinceMergeBase(baseRef: string, execFn: (cmd: string) => string = cmd => execSync(cmd, { encoding: "utf8" })): number {
+	try {
+		const mergeBase = execFn(`git merge-base ${baseRef} HEAD`).trim();
+		const count = execFn(`git rev-list --count ${mergeBase}..HEAD`).trim();
 		return parseInt(count, 10) || 0;
 	} catch {
 		return 0;

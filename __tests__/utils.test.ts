@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import {
+	formatPreid,
+	getCommitCountSinceMergeBase,
 	getCommitCountSinceFileChange,
 	isPrerelease,
 	listRemoteBranchNames,
@@ -11,10 +13,31 @@ import {
 	resolvePreid,
 	resolveTag,
 	resolveVersionConflict,
+	sanitizeBranchName,
 	stripPreid,
 } from "../src/utils";
 
 const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"];
+
+describe("sanitizeBranchName", () => {
+	test.each([
+		["feature/e2e", "e2e"],
+		["feature/invoice/pro", "invoice-pro"],
+		["HOTFIX/Tax Fix", "tax-fix"],
+		["chore///release__proof", "release-proof"],
+		[`feature/${"safe-branch-".repeat(15)}safe-branch`, `${"safe-branch-".repeat(15)}safe-branch`],
+	])("sanitizes %s", (branch, expected) => {
+		expect(sanitizeBranchName(branch)).toBe(expected);
+	});
+
+	test("rejects an empty result", () => {
+		expect(() => sanitizeBranchName("feature/---")).toThrow("usable branch slug");
+	});
+});
+
+test("formats a branch-qualified preid", () => {
+	expect(formatPreid("{preid}-{branch}", "demo", "e2e")).toBe("demo-e2e");
+});
 
 describe("isPrerelease", () => {
 	test.each([
@@ -353,6 +376,32 @@ describe("getCommitCountSinceFileChange", () => {
 		};
 		getCommitCountSinceFileChange("package.json", execFn);
 		expect(commands[0]).not.toContain("-G");
+	});
+});
+
+describe("getCommitCountSinceMergeBase", () => {
+	test("returns commits since the merge base and uses the merge-base sha", () => {
+		const commands: string[] = [];
+		const execFn = (cmd: string): string => {
+			commands.push(cmd);
+			return commands.length === 1 ? "abc123\n" : "5\n";
+		};
+
+		expect(getCommitCountSinceMergeBase("origin/main", execFn)).toBe(5);
+		expect(commands).toEqual(["git merge-base origin/main HEAD", "git rev-list --count abc123..HEAD"]);
+	});
+
+	test.each(["merge-base", "rev-list"])("returns 0 when %s fails", stage => {
+		let call = 0;
+		const execFn = (): string => {
+			call++;
+			if ((stage === "merge-base" && call === 1) || (stage === "rev-list" && call === 2)) {
+				throw new Error("git failure");
+			}
+			return call === 1 ? "abc123\n" : "5\n";
+		};
+
+		expect(getCommitCountSinceMergeBase("origin/main", execFn)).toBe(0);
 	});
 });
 
