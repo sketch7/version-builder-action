@@ -44,7 +44,8 @@ inputs:
   preid:
     required: false
     description: "Version preid to append e.g. 'dev', if not specified will read from
-      `package.json` or generated via branch name."
+      `package.json` or generated via branch name. The completed prerelease suffix
+      must be valid SemVer."
     # default: "default value if applicable"
   preid-template:
     required: false

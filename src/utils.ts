@@ -16,11 +16,17 @@ export function sanitizeBranchName(branch: string): string {
 }
 
 export function formatPreid(template: string, preid: string, branchSlug: string): string {
-	const value = template.replaceAll("{preid}", preid).replaceAll("{branch}", branchSlug);
-	if (!/^[0-9A-Za-z-]+$/.test(value)) {
-		throw new Error(`Invalid formatted preid '${value}'`);
+	return template.replaceAll("{preid}", preid).replaceAll("{branch}", branchSlug);
+}
+
+export function validatePrereleaseSuffix(suffix: string): void {
+	const identifiers = suffix.split(".");
+	const isValid = identifiers.every(
+		identifier => /^[0-9A-Za-z-]+$/.test(identifier) && (!/^\d+$/.test(identifier) || /^(?:0|[1-9]\d*)$/.test(identifier)),
+	);
+	if (!isValid) {
+		throw new Error(`Invalid prerelease suffix '${suffix}'`);
 	}
-	return value;
 }
 
 export function coerceArray<T>(value: T | T[]): T[] {
@@ -143,7 +149,8 @@ export function parseStableTagMajor(tag: string, tagTmpl: string): number | null
 	const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	const prefix = escapeRegex(tagTmpl.slice(0, markerIndex));
 	const suffix = escapeRegex(tagTmpl.slice(markerIndex + marker.length));
-	const match = new RegExp(`^${prefix}(\\d+)\\.\\d+\\.\\d+${suffix}$`).exec(tag);
+	const numericIdentifier = "(?:0|[1-9]\\d*)";
+	const match = new RegExp(`^${prefix}(${numericIdentifier})\\.${numericIdentifier}\\.${numericIdentifier}${suffix}$`).exec(tag);
 	return match ? Number(match[1]) : null;
 }
 
@@ -248,6 +255,16 @@ export interface VersionConflictResult {
 	bumped: boolean;
 }
 
+function formatStableTag(tagTmpl: string, version: { major: number; minor: number; patch: number }): string {
+	const marker = "{major}";
+	const markerIndex = tagTmpl.indexOf(marker);
+	const versionText = `${version.major}.${version.minor}.${version.patch}`;
+	if (markerIndex === -1) {
+		return `${tagTmpl}${versionText}`;
+	}
+	return `${tagTmpl.slice(0, markerIndex)}${versionText}${tagTmpl.slice(markerIndex + marker.length)}`;
+}
+
 /**
  * Resolves a stable `major.minor.patch` version against existing git tags.
  * `mode: "ignore"` returns the version unchanged (default, non-breaking).
@@ -269,9 +286,8 @@ export function resolveVersionConflict(input: {
 		return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: false };
 	}
 
-	const [prefix] = tagTmpl.split("{major}");
 	const tagSet = new Set(existingTags);
-	const exactTag = `${prefix}${major}.${minor}.${patch}`;
+	const exactTag = formatStableTag(tagTmpl, { major, minor, patch });
 	if (!tagSet.has(exactTag)) {
 		return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: false };
 	}
@@ -282,6 +298,6 @@ export function resolveVersionConflict(input: {
 
 	do {
 		patch++;
-	} while (tagSet.has(`${prefix}${major}.${minor}.${patch}`));
+	} while (tagSet.has(formatStableTag(tagTmpl, { major, minor, patch })));
 	return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: true };
 }

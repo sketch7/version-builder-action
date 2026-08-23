@@ -187,6 +187,46 @@ test("stable versions in an older major use the LTS tag and report isLatest fals
 	expect(core.setOutput).toHaveBeenCalledWith("tag", "v3-lts");
 });
 
+describe("prerelease suffix validation", () => {
+	function mockInputs(preid: string, preidDelimiter: string): void {
+		vi.mocked(github).context = { ref: "refs/heads/feature/my-workflow" } as typeof github.context;
+		vi.mocked(core.getInput).mockImplementation((name: string) => {
+			const map: Record<string, string> = {
+				version: "1.0.0",
+				preid,
+				"preid-branches": "main:rc,master:rc,develop:dev",
+				"stable-branches": "^v\\d+$,^\\d+\\.x$",
+				"preid-num-delimiter": preidDelimiter,
+			};
+			return map[name] ?? "";
+		});
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	}
+
+	test("preserves dot-separated preids with the default template", async () => {
+		mockInputs("rc.preview", ".");
+
+		await run();
+
+		expect(core.setOutput).toHaveBeenCalledWith("version", "1.0.0-rc.preview.0");
+		expect(core.setOutput).toHaveBeenCalledWith("preid", "rc.preview");
+	});
+
+	test("rejects a leading-zero numeric prerelease identifier", async () => {
+		mockInputs("01", ".");
+
+		await expect(run()).rejects.toThrow("Invalid prerelease suffix '01.0'");
+	});
+
+	test("permits a leading zero when a hyphen delimiter makes the identifier nonnumeric", async () => {
+		mockInputs("01", "-");
+
+		await run();
+
+		expect(core.setOutput).toHaveBeenCalledWith("version", "1.0.0-01-0");
+	});
+});
+
 describe("on-version-conflict", () => {
 	function mockInputs(overrides: { version: string; onVersionConflict?: string; tagTmpl?: string }): void {
 		vi.mocked(github).context = { ref: "refs/heads/v3" } as typeof github.context;

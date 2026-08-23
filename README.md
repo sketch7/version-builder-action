@@ -28,6 +28,10 @@ both semver and non-semver variants as outputs.
   default it counts commits since the last `package.json` version change, so it
   resets to `0` on every version bump. Set `counter-base-ref` to count commits
   since that ref's merge base with `HEAD` instead.
+- The assembled prerelease suffix must be valid SemVer: dot-separated
+  identifiers may contain letters, digits, and hyphens, while a numeric-only
+  identifier cannot have a leading zero. For example, `rc.preview.0` and
+  `01-0` are valid; `01.0` is not.
 - When stable, the version is emitted unchanged: `1.5.6`
 - A `tag` output is always emitted: pre-release builds use the formatted preid
   label (e.g. `rc`, `demo-e2e`); stable builds emit `latest` when their major is

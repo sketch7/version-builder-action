@@ -17,6 +17,7 @@ import {
 	resolveVersionConflict,
 	sanitizeBranchName,
 	stripPreid,
+	validatePrereleaseSuffix,
 } from "./utils";
 import type { VersionConflictMode } from "./utils";
 
@@ -88,7 +89,9 @@ export async function run(): Promise<void> {
 
 	if (isPreRel) {
 		core.debug("Use preid for branch");
-		versionSuffix = `${formattedPreid}${preidDelimiter}${commitCount}`;
+		const prereleaseSuffix = `${formattedPreid}${preidDelimiter}${commitCount}`;
+		validatePrereleaseSuffix(prereleaseSuffix);
+		versionSuffix = prereleaseSuffix;
 
 		if (versionSegments.length === 3) {
 			fileVersion = `${baseVersion}.${commitCount}`;

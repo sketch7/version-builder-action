@@ -19882,9 +19882,10 @@ function sanitizeBranchName(branch) {
 	return slug;
 }
 function formatPreid(template, preid, branchSlug) {
-	const value = template.replaceAll("{preid}", preid).replaceAll("{branch}", branchSlug);
-	if (!/^[0-9A-Za-z-]+$/.test(value)) throw new Error(`Invalid formatted preid '${value}'`);
-	return value;
+	return template.replaceAll("{preid}", preid).replaceAll("{branch}", branchSlug);
+}
+function validatePrereleaseSuffix(suffix) {
+	if (!suffix.split(".").every((identifier) => /^[0-9A-Za-z-]+$/.test(identifier) && (!/^\d+$/.test(identifier) || /^(?:0|[1-9]\d*)$/.test(identifier)))) throw new Error(`Invalid prerelease suffix '${suffix}'`);
 }
 function coerceArray(value) {
 	return Array.isArray(value) ? value : [value];
@@ -19947,7 +19948,8 @@ function parseStableTagMajor(tag, tagTmpl) {
 	const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	const prefix = escapeRegex(tagTmpl.slice(0, markerIndex));
 	const suffix = escapeRegex(tagTmpl.slice(markerIndex + 7));
-	const match = new RegExp(`^${prefix}(\\d+)\\.\\d+\\.\\d+${suffix}$`).exec(tag);
+	const numericIdentifier = "(?:0|[1-9]\\d*)";
+	const match = new RegExp(`^${prefix}(${numericIdentifier})\\.${numericIdentifier}\\.${numericIdentifier}${suffix}$`).exec(tag);
 	return match ? Number(match[1]) : null;
 }
 /**
@@ -20014,6 +20016,12 @@ function listTagNames(execFn = (cmd) => execSync(cmd, { encoding: "utf8" })) {
 		return [];
 	}
 }
+function formatStableTag(tagTmpl, version) {
+	const markerIndex = tagTmpl.indexOf("{major}");
+	const versionText = `${version.major}.${version.minor}.${version.patch}`;
+	if (markerIndex === -1) return `${tagTmpl}${versionText}`;
+	return `${tagTmpl.slice(0, markerIndex)}${versionText}${tagTmpl.slice(markerIndex + 7)}`;
+}
 /**
 * Resolves a stable `major.minor.patch` version against existing git tags.
 * `mode: "ignore"` returns the version unchanged (default, non-breaking).
@@ -20028,9 +20036,12 @@ function resolveVersionConflict(input) {
 		patch,
 		bumped: false
 	};
-	const [prefix] = tagTmpl.split("{major}");
 	const tagSet = new Set(existingTags);
-	const exactTag = `${prefix}${major}.${minor}.${patch}`;
+	const exactTag = formatStableTag(tagTmpl, {
+		major,
+		minor,
+		patch
+	});
 	if (!tagSet.has(exactTag)) return {
 		baseVersion: `${major}.${minor}.${patch}`,
 		patch,
@@ -20039,7 +20050,11 @@ function resolveVersionConflict(input) {
 	if (mode === "fail") throw new Error(`Tag '${exactTag}' already exists. Bump the version and retry, or use on-version-conflict: bump-patch to auto-increment.`);
 	do
 		patch++;
-	while (tagSet.has(`${prefix}${major}.${minor}.${patch}`));
+	while (tagSet.has(formatStableTag(tagTmpl, {
+		major,
+		minor,
+		patch
+	})));
 	return {
 		baseVersion: `${major}.${minor}.${patch}`,
 		patch,
@@ -20109,7 +20124,9 @@ async function run() {
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	if (isPreRel) {
 		debug("Use preid for branch");
-		versionSuffix = `${formattedPreid}${preidDelimiter}${commitCount}`;
+		const prereleaseSuffix = `${formattedPreid}${preidDelimiter}${commitCount}`;
+		validatePrereleaseSuffix(prereleaseSuffix);
+		versionSuffix = prereleaseSuffix;
 		if (versionSegments.length === 3) fileVersion = `${baseVersion}.${commitCount}`;
 	} else if (versionSegments.length === 3) try {
 		const result = resolveVersionConflict({

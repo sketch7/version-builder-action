@@ -40,6 +40,10 @@ test("formats a branch-qualified preid", () => {
 	expect(formatPreid("{preid}-{branch}", "demo", "e2e")).toBe("demo-e2e");
 });
 
+test("formats a dot-separated preid without a branch placeholder", () => {
+	expect(formatPreid("{preid}", "rc.preview", "")).toBe("rc.preview");
+});
+
 describe("isPrerelease", () => {
 	test.each([
 		// prerelease
@@ -513,11 +517,34 @@ describe("resolveVersionConflict", () => {
 			"Tag 'v1.0.0' already exists",
 		);
 	});
+
+	test("fail mode expands a tag-template suffix", () => {
+		expect(() =>
+			resolveVersionConflict({ major: 1, minor: 0, patch: 0, tagTmpl: "v{major}-stable", mode: "fail", existingTags: ["v1.0.0-stable"] }),
+		).toThrow("Tag 'v1.0.0-stable' already exists");
+	});
+
+	test("bump-patch expands a tag-template suffix for every candidate", () => {
+		expect(
+			resolveVersionConflict({
+				major: 1,
+				minor: 0,
+				patch: 0,
+				tagTmpl: "v{major}-stable",
+				mode: "bump-patch",
+				existingTags: ["v1.0.0-stable", "v1.0.1-stable"],
+			}),
+		).toEqual({ baseVersion: "1.0.2", patch: 2, bumped: true });
+	});
 });
 
 describe("parseStableTagMajor", () => {
 	test.each([
+		["v0.0.0", "v{major}", 0],
 		["v1.2.3", "v{major}", 1],
+		["v02.0.0", "v{major}", null],
+		["v1.02.0", "v{major}", null],
+		["v1.0.03", "v{major}", null],
 		["v2.0.0-rc.4", "v{major}", null],
 		["v2", "v{major}", null],
 		["release-3.1.0", "release-{major}", 3],
