@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+	formatReleaseTags,
 	formatPreid,
 	getCommitCountSinceMergeBase,
 	getCommitCountSinceFileChange,
@@ -9,6 +10,7 @@ import {
 	listTagNames,
 	matchesBranchPattern,
 	parsePreidBranches,
+	parseCanonicalVersion,
 	parseStableTagMajor,
 	resolvePreid,
 	resolveTag,
@@ -16,9 +18,50 @@ import {
 	sanitizeBranchName,
 	stripPreid,
 	isLatestStableMajor,
+	validateGitTag,
 } from "../src/utils";
 
 const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"];
+
+describe("parseCanonicalVersion", () => {
+	test.each([
+		["stable version", "1.3.0", { version: "1.3.0", major: "1", minor: "3", patch: "0", isPrerelease: false }],
+		["prerelease version", "1.3.0-rc.5", { version: "1.3.0-rc.5", major: "1", minor: "3", patch: "0", isPrerelease: true }],
+	])("parses a canonical $0", (_name, version, expected) => {
+		expect(parseCanonicalVersion(version)).toEqual(expected);
+	});
+
+	test.each(["01.3.0", "1.03.0", "1.3.00", "1.3", "1.3.0+build.1"])("rejects non-canonical version %s", version => {
+		expect(() => parseCanonicalVersion(version)).toThrow("canonical SemVer");
+	});
+});
+
+describe("formatReleaseTags", () => {
+	test("formats exact and floating tags from the canonical major marker", () => {
+		expect(formatReleaseTags("1.3.0", "v{major}")).toEqual({ exactTag: "v1.3.0", floatingTag: "v1" });
+	});
+
+	test.each(["v{major}-{major}", "v1"])('rejects tag template "%s" without exactly one major marker', tagTmpl => {
+		expect(() => formatReleaseTags("1.3.0", tagTmpl)).toThrow("exactly one {major}");
+	});
+});
+
+describe("validateGitTag", () => {
+	test.each([
+		"v1  ",
+		"release..candidate",
+		"release@{candidate",
+		"release.lock",
+		"release~candidate",
+		"release:candidate",
+		"release?candidate",
+		"release*candidate",
+		"release[candidate",
+		"release\\candidate",
+	])("rejects invalid Git tag %s", tag => {
+		expect(() => validateGitTag(tag)).toThrow("Invalid Git tag");
+	});
+});
 
 describe("sanitizeBranchName", () => {
 	test.each([

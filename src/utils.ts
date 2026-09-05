@@ -1,6 +1,73 @@
 import { execFileSync, execSync } from "child_process";
 
 const CONVENTIONAL_PREFIX = /^(?:feature|feat|fix|hotfix|bugfix|chore|spike)\/+/i;
+const CANONICAL_VERSION =
+	/^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
+const GIT_TAG_FORBIDDEN_CHARACTERS = "~^:?*[\\";
+
+export interface CanonicalVersion {
+	version: string;
+	major: string;
+	minor: string;
+	patch: string;
+	isPrerelease: boolean;
+}
+
+export interface ReleaseTags {
+	exactTag: string;
+	floatingTag: string;
+}
+
+export function parseCanonicalVersion(version: string): CanonicalVersion {
+	const match = CANONICAL_VERSION.exec(version);
+	if (!match?.groups) {
+		throw new Error(`Version '${version}' must be canonical SemVer without build metadata`);
+	}
+	const { major, minor, patch, prerelease } = match.groups;
+
+	return {
+		version,
+		major,
+		minor,
+		patch,
+		isPrerelease: prerelease !== undefined,
+	};
+}
+
+export function validateGitTag(tag: string): void {
+	const hasForbiddenCharacter = Array.from(tag).some(character => {
+		const codePoint = character.codePointAt(0);
+		return (codePoint !== undefined && (codePoint <= 0x20 || codePoint === 0x7f)) || GIT_TAG_FORBIDDEN_CHARACTERS.includes(character);
+	});
+	const invalid =
+		tag.length === 0 ||
+		tag === "@" ||
+		tag.startsWith("/") ||
+		tag.endsWith("/") ||
+		tag.includes("//") ||
+		tag.includes("..") ||
+		tag.includes("@{") ||
+		tag.endsWith(".") ||
+		hasForbiddenCharacter ||
+		tag.split("/").some(part => part.startsWith(".") || part.endsWith(".lock"));
+	if (invalid) {
+		throw new Error(`Invalid Git tag '${tag}'`);
+	}
+}
+
+export function formatReleaseTags(version: string, tagTmpl: string): ReleaseTags {
+	const canonicalVersion = parseCanonicalVersion(version);
+	const [prefix, suffix, ...additionalMarkers] = tagTmpl.split("{major}");
+	if (suffix === undefined || additionalMarkers.length > 0) {
+		throw new Error("Tag template must contain exactly one {major} marker");
+	}
+
+	const exactTag = `${prefix}${canonicalVersion.version}${suffix}`;
+	const floatingTag = `${prefix}${canonicalVersion.major}${suffix}`;
+	validateGitTag(exactTag);
+	validateGitTag(floatingTag);
+	return { exactTag, floatingTag };
+}
 
 export function sanitizeBranchName(branch: string): string {
 	const slug = branch
