@@ -34,6 +34,32 @@ describe("parseCanonicalVersion", () => {
 	test.each(["01.3.0", "1.03.0", "1.3.00", "1.3", "1.3.0+build.1"])("rejects non-canonical version %s", version => {
 		expect(() => parseCanonicalVersion(version)).toThrow("canonical SemVer");
 	});
+
+	test.each(["1.3.0-01", "1.3.0-rc.05"])("rejects numeric prerelease identifiers with leading zeroes: %s", version => {
+		expect(() => parseCanonicalVersion(version)).toThrow("canonical SemVer");
+	});
+
+	test("rejects an adversarially long malformed prerelease without pathological backtracking", () => {
+		const prerelease = "a".repeat(50_000);
+		const startedAt = performance.now();
+
+		expect(() => parseCanonicalVersion(`1.3.0-${prerelease}.`)).toThrow("canonical SemVer");
+		expect(performance.now() - startedAt).toBeLessThan(1_000);
+	});
+
+	test("preserves large canonical components without numeric coercion", () => {
+		const major = "9".repeat(1_000);
+		const minor = "8".repeat(1_000);
+		const patch = "7".repeat(1_000);
+
+		expect(parseCanonicalVersion(`${major}.${minor}.${patch}`)).toEqual({
+			version: `${major}.${minor}.${patch}`,
+			major,
+			minor,
+			patch,
+			isPrerelease: false,
+		});
+	});
 });
 
 describe("formatReleaseTags", () => {
@@ -41,9 +67,27 @@ describe("formatReleaseTags", () => {
 		expect(formatReleaseTags("1.3.0", "v{major}")).toEqual({ exactTag: "v1.3.0", floatingTag: "v1" });
 	});
 
+	test("formats prerelease tags", () => {
+		expect(formatReleaseTags("1.3.0-rc.5", "v{major}")).toEqual({ exactTag: "v1.3.0-rc.5", floatingTag: "v1" });
+	});
+
+	test("formats nested tags with a prefix and suffix", () => {
+		expect(formatReleaseTags("1.3.0", "release/v{major}-stable")).toEqual({
+			exactTag: "release/v1.3.0-stable",
+			floatingTag: "release/v1-stable",
+		});
+	});
+
 	test.each(["v{major}-{major}", "v1"])('rejects tag template "%s" without exactly one major marker', tagTmpl => {
 		expect(() => formatReleaseTags("1.3.0", tagTmpl)).toThrow("exactly one {major}");
 	});
+
+	test.each(["release {major}", "release..{major}", "release@{{major}", "release-{major}.lock"])(
+		"rejects invalid generated tag template %s",
+		tagTmpl => {
+			expect(() => formatReleaseTags("1.3.0", tagTmpl)).toThrow("Invalid Git tag");
+		},
+	);
 });
 
 describe("validateGitTag", () => {
@@ -60,6 +104,10 @@ describe("validateGitTag", () => {
 		"release\\candidate",
 	])("rejects invalid Git tag %s", tag => {
 		expect(() => validateGitTag(tag)).toThrow("Invalid Git tag");
+	});
+
+	test.each(["@", "release/v1.3.0"])("accepts complete Git tag %s", tag => {
+		expect(() => validateGitTag(tag)).not.toThrow();
 	});
 });
 

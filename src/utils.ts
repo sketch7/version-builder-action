@@ -1,9 +1,62 @@
 import { execFileSync, execSync } from "child_process";
 
 const CONVENTIONAL_PREFIX = /^(?:feature|feat|fix|hotfix|bugfix|chore|spike)\/+/i;
-const CANONICAL_VERSION =
-	/^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
 const GIT_TAG_FORBIDDEN_CHARACTERS = "~^:?*[\\";
+
+function isAsciiDigit(codePoint: number): boolean {
+	return codePoint >= 0x30 && codePoint <= 0x39;
+}
+
+function isCanonicalNumericIdentifier(value: string, start: number, end: number): boolean {
+	if (start === end) {
+		return false;
+	}
+
+	const firstCodePoint = value.charCodeAt(start);
+	if (firstCodePoint === 0x30) {
+		return end - start === 1;
+	}
+	if (firstCodePoint < 0x31 || firstCodePoint > 0x39) {
+		return false;
+	}
+
+	for (let index = start + 1; index < end; index++) {
+		if (!isAsciiDigit(value.charCodeAt(index))) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function isValidPrereleaseIdentifier(value: string, start: number, end: number): boolean {
+	let hasNonNumericCharacter = false;
+	for (let index = start; index < end; index++) {
+		const codePoint = value.charCodeAt(index);
+		if (isAsciiDigit(codePoint)) {
+			continue;
+		}
+		if ((codePoint >= 0x41 && codePoint <= 0x5a) || (codePoint >= 0x61 && codePoint <= 0x7a) || codePoint === 0x2d) {
+			hasNonNumericCharacter = true;
+			continue;
+		}
+		return false;
+	}
+
+	return hasNonNumericCharacter || isCanonicalNumericIdentifier(value, start, end);
+}
+
+function isCanonicalPrerelease(value: string, start: number): boolean {
+	let identifierStart = start;
+	for (let index = start; index <= value.length; index++) {
+		if (index === value.length || value.charCodeAt(index) === 0x2e) {
+			if (!isValidPrereleaseIdentifier(value, identifierStart, index)) {
+				return false;
+			}
+			identifierStart = index + 1;
+		}
+	}
+	return true;
+}
 
 export interface CanonicalVersion {
 	version: string;
@@ -19,18 +72,29 @@ export interface ReleaseTags {
 }
 
 export function parseCanonicalVersion(version: string): CanonicalVersion {
-	const match = CANONICAL_VERSION.exec(version);
-	if (!match?.groups) {
+	const prereleaseStart = version.indexOf("-");
+	const coreEnd = prereleaseStart === -1 ? version.length : prereleaseStart;
+	const firstDot = version.indexOf(".");
+	const secondDot = firstDot === -1 ? -1 : version.indexOf(".", firstDot + 1);
+	const thirdDot = secondDot === -1 ? -1 : version.indexOf(".", secondDot + 1);
+	const hasCanonicalCore =
+		firstDot > 0 &&
+		secondDot > firstDot + 1 &&
+		secondDot < coreEnd &&
+		(thirdDot === -1 || thirdDot >= coreEnd) &&
+		isCanonicalNumericIdentifier(version, 0, firstDot) &&
+		isCanonicalNumericIdentifier(version, firstDot + 1, secondDot) &&
+		isCanonicalNumericIdentifier(version, secondDot + 1, coreEnd);
+	if (version.includes("+") || !hasCanonicalCore || (prereleaseStart !== -1 && !isCanonicalPrerelease(version, prereleaseStart + 1))) {
 		throw new Error(`Version '${version}' must be canonical SemVer without build metadata`);
 	}
-	const { major, minor, patch, prerelease } = match.groups;
 
 	return {
 		version,
-		major,
-		minor,
-		patch,
-		isPrerelease: prerelease !== undefined,
+		major: version.slice(0, firstDot),
+		minor: version.slice(firstDot + 1, secondDot),
+		patch: version.slice(secondDot + 1, coreEnd),
+		isPrerelease: prereleaseStart !== -1,
 	};
 }
 
@@ -41,7 +105,6 @@ export function validateGitTag(tag: string): void {
 	});
 	const invalid =
 		tag.length === 0 ||
-		tag === "@" ||
 		tag.startsWith("/") ||
 		tag.endsWith("/") ||
 		tag.includes("//") ||
