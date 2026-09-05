@@ -1,6 +1,7 @@
-import { parseCanonicalVersion, validateGitTag } from "./utils";
+import { formatReleaseTags, parseCanonicalVersion, validateGitTag } from "./utils";
 
 const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
+const TAG_REF_PREFIX = "refs/tags/";
 
 export interface ExistingRelease {
 	draft: boolean;
@@ -9,7 +10,6 @@ export interface ExistingRelease {
 
 export interface ReleaseState {
 	branchSha: string;
-	tags: string[];
 	exactTagCommit: string | null;
 	existingRelease: ExistingRelease | null;
 }
@@ -20,7 +20,7 @@ export interface ReleaseValidation {
 	exactTagExists: boolean;
 }
 
-export interface LoadReleaseStateInput {
+export interface LoadResolvedReleaseStateInput {
 	branch: string;
 	exactTag: string;
 }
@@ -28,19 +28,18 @@ export interface LoadReleaseStateInput {
 export interface ValidateResolvedReleaseInput {
 	expectedSha: string;
 	version: string;
-	exactTag: string;
-	floatingTag: string;
+	tagTmpl: string;
 }
 
 /**
- * Small GitHub boundary for live preflight checks.
+ * GitHub boundary for live release preflight checks.
  *
- * The Action adapter maps Octokit responses into these raw Git-object shapes so
- * the release policy can be tested without an Octokit dependency.
+ * `listTagPages` accepts Octokit's paginator directly. The other methods return
+ * each endpoint's `.data`, keeping policy independent of Octokit types.
  */
 export interface ReleasePreflightClient {
 	getRef: (ref: string) => Promise<unknown>;
-	listTags: (page: number) => Promise<unknown>;
+	listTagPages: () => AsyncIterable<unknown>;
 	getGitObject: (sha: string) => Promise<unknown>;
 	getReleaseByTag: (tag: string) => Promise<unknown>;
 }
@@ -73,7 +72,7 @@ function readObjectReference(value: unknown, label: string): { type: "commit" | 
 }
 
 function readAnnotatedTag(value: unknown): { type: "commit" | "tag"; sha: string } {
-	if (!isRecord(value) || value.type !== "tag" || !isRecord(value.object)) {
+	if (!isRecord(value) || !isRecord(value.object)) {
 		throw new Error("Malformed annotated tag object from GitHub");
 	}
 
@@ -82,6 +81,40 @@ function readAnnotatedTag(value: unknown): { type: "commit" | "tag"; sha: string
 		throw new Error("Malformed annotated tag target type from GitHub");
 	}
 	return { type, sha: readSha(sha, "annotated tag target") };
+}
+
+function readTagPage(value: unknown): unknown[] {
+	if (Array.isArray(value)) {
+		return value;
+	}
+	if (isRecord(value) && Array.isArray(value.data)) {
+		return value.data;
+	}
+	throw new Error("Malformed tag page from GitHub");
+}
+
+function readTagName(value: unknown): string {
+	if (!isRecord(value)) {
+		throw new Error("Malformed tag entry from GitHub");
+	}
+	if (typeof value.name === "string" && value.name.length > 0) {
+		return value.name;
+	}
+	if (typeof value.ref === "string" && value.ref.startsWith(TAG_REF_PREFIX) && value.ref.length > TAG_REF_PREFIX.length) {
+		return value.ref.slice(TAG_REF_PREFIX.length);
+	}
+	throw new Error("Malformed tag entry from GitHub");
+}
+
+/** Loads the authoritative complete tag set before resolving a release version. */
+export async function loadLiveTags(client: ReleasePreflightClient): Promise<string[]> {
+	const tags: string[] = [];
+	for await (const page of client.listTagPages()) {
+		for (const tag of readTagPage(page)) {
+			tags.push(readTagName(tag));
+		}
+	}
+	return tags;
 }
 
 async function resolveTagCommit(client: ReleasePreflightClient, exactTag: string): Promise<string | null> {
@@ -108,27 +141,6 @@ async function resolveTagCommit(client: ReleasePreflightClient, exactTag: string
 	return object.sha;
 }
 
-async function loadTags(client: ReleasePreflightClient): Promise<string[]> {
-	const tags: string[] = [];
-	for (let page = 1; ; page++) {
-		// oxlint-disable-next-line no-await-in-loop -- An empty response ends sequential pagination.
-		const response = await client.listTags(page);
-		if (!Array.isArray(response)) {
-			throw new Error("Malformed tag page from GitHub");
-		}
-		if (response.length === 0) {
-			return tags;
-		}
-
-		for (const tag of response) {
-			if (!isRecord(tag) || typeof tag.name !== "string" || tag.name.length === 0) {
-				throw new Error("Malformed tag entry from GitHub");
-			}
-			tags.push(tag.name);
-		}
-	}
-}
-
 async function loadExistingRelease(client: ReleasePreflightClient, exactTag: string): Promise<ExistingRelease | null> {
 	try {
 		const response = await client.getReleaseByTag(exactTag);
@@ -144,44 +156,40 @@ async function loadExistingRelease(client: ReleasePreflightClient, exactTag: str
 	}
 }
 
-export async function loadReleaseState(input: LoadReleaseStateInput, client: ReleasePreflightClient): Promise<ReleaseState> {
+/** Inspects only the state that can be evaluated after the exact version is resolved. */
+export async function loadResolvedReleaseState(input: LoadResolvedReleaseStateInput, client: ReleasePreflightClient): Promise<ReleaseState> {
+	validateGitTag(input.exactTag);
 	const branchReference = readObjectReference(await client.getRef(`heads/${input.branch}`), "branch reference");
 	if (branchReference.type !== "commit") {
 		throw new Error("Malformed branch reference target from GitHub");
 	}
 
-	const [tags, exactTagCommit, existingRelease] = await Promise.all([
-		loadTags(client),
+	const [exactTagCommit, existingRelease] = await Promise.all([
 		resolveTagCommit(client, input.exactTag),
 		loadExistingRelease(client, input.exactTag),
 	]);
-	return { branchSha: branchReference.sha, tags, exactTagCommit, existingRelease };
+	return { branchSha: branchReference.sha, exactTagCommit, existingRelease };
 }
 
 export function validateResolvedRelease(input: ValidateResolvedReleaseInput, state: ReleaseState): ReleaseValidation {
 	const canonicalVersion = parseCanonicalVersion(input.version);
-	validateGitTag(input.exactTag);
-	validateGitTag(input.floatingTag);
+	const { exactTag, floatingTag } = formatReleaseTags(canonicalVersion.version, input.tagTmpl);
 	const expectedSha = readSha(input.expectedSha, "expected commit");
 
 	if (state.branchSha !== expectedSha) {
 		throw new Error(`Release SHA '${expectedSha}' is not the current branch head`);
 	}
 	if (state.exactTagCommit !== null && state.exactTagCommit !== expectedSha) {
-		throw new Error(`Exact tag '${input.exactTag}' points to another commit`);
+		throw new Error(`Exact tag '${exactTag}' points to another commit`);
 	}
 	if (state.existingRelease !== null) {
 		if (state.exactTagCommit === null) {
-			throw new Error(`existing release for '${input.exactTag}' has no matching exact tag`);
+			throw new Error(`existing release for '${exactTag}' has no matching exact tag`);
 		}
 		if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) {
-			throw new Error(`existing release for '${input.exactTag}' is not a matching published release`);
+			throw new Error(`existing release for '${exactTag}' is not a matching published release`);
 		}
 	}
 
-	return {
-		exactTag: input.exactTag,
-		floatingTag: input.floatingTag,
-		exactTagExists: state.exactTagCommit !== null,
-	};
+	return { exactTag, floatingTag, exactTagExists: state.exactTagCommit !== null };
 }
