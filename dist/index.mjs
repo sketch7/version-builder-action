@@ -17481,6 +17481,11 @@ var __awaiter = void 0 && (void 0).__awaiter || function(thisArg, _arguments, P,
 		step((generator = generator.apply(thisArg, _arguments || [])).next());
 	});
 };
+function getAuthString(token, options) {
+	if (!token && !options.auth) throw new Error("Parameter token or opts.auth is required");
+	else if (token && options.auth) throw new Error("Parameters token and opts.auth may not both be specified");
+	return typeof options.auth === "string" ? options.auth : `token ${token}`;
+}
 function getProxyAgent(destinationUrl) {
 	return new import_lib.HttpClient().getAgent(destinationUrl);
 }
@@ -17496,6 +17501,16 @@ function getProxyFetch(destinationUrl) {
 }
 function getApiBaseUrl() {
 	return process.env["GITHUB_API_URL"] || "https://api.github.com";
+}
+function getUserAgentWithOrchestrationId(baseUserAgent) {
+	var _a;
+	const orchId = (_a = process.env["ACTIONS_ORCHESTRATION_ID"]) === null || _a === void 0 ? void 0 : _a.trim();
+	if (orchId) {
+		const tag = `actions_orchestration_id/${orchId.replace(/[^a-z0-9_.-]/gi, "_")}`;
+		if (baseUserAgent === null || baseUserAgent === void 0 ? void 0 : baseUserAgent.includes(tag)) return baseUserAgent;
+		return `${baseUserAgent ? `${baseUserAgent} ` : ""}${tag}`;
+	}
+	return baseUserAgent;
 }
 
 function getUserAgent() {
@@ -19872,10 +19887,102 @@ const defaults = {
 	}
 };
 const GitHub = Octokit.plugin(restEndpointMethods, paginateRest).defaults(defaults);
+/**
+* Convience function to correctly format Octokit Options to pass into the constructor.
+*
+* @param     token    the repo PAT or GITHUB_TOKEN
+* @param     options  other options to set
+*/
+function getOctokitOptions(token, options) {
+	const opts = Object.assign({}, options || {});
+	const auth = getAuthString(token, opts);
+	if (auth) opts.auth = auth;
+	const userAgent = getUserAgentWithOrchestrationId(opts.userAgent);
+	if (userAgent) opts.userAgent = userAgent;
+	return opts;
+}
 
 const context = new Context();
+/**
+* Returns a hydrated octokit ready to use for GitHub Actions
+*
+* @param     token    the repo PAT or GITHUB_TOKEN
+* @param     options  other options to set
+*/
+function getOctokit(token, options, ...additionalPlugins) {
+	return new (GitHub.plugin(...additionalPlugins))(getOctokitOptions(token, options));
+}
 
 const CONVENTIONAL_PREFIX = /^(?:feature|feat|fix|hotfix|bugfix|chore|spike)\/+/i;
+const GIT_TAG_FORBIDDEN_CHARACTERS = "~^:?*[\\";
+function isAsciiDigit(codePoint) {
+	return codePoint >= 48 && codePoint <= 57;
+}
+function isCanonicalNumericIdentifier(value, start, end) {
+	if (start === end) return false;
+	const firstCodePoint = value.charCodeAt(start);
+	if (firstCodePoint === 48) return end - start === 1;
+	if (firstCodePoint < 49 || firstCodePoint > 57) return false;
+	for (let index = start + 1; index < end; index++) if (!isAsciiDigit(value.charCodeAt(index))) return false;
+	return true;
+}
+function isValidPrereleaseIdentifier(value, start, end) {
+	let hasNonNumericCharacter = false;
+	for (let index = start; index < end; index++) {
+		const codePoint = value.charCodeAt(index);
+		if (isAsciiDigit(codePoint)) continue;
+		if (codePoint >= 65 && codePoint <= 90 || codePoint >= 97 && codePoint <= 122 || codePoint === 45) {
+			hasNonNumericCharacter = true;
+			continue;
+		}
+		return false;
+	}
+	return hasNonNumericCharacter || isCanonicalNumericIdentifier(value, start, end);
+}
+function isCanonicalPrerelease(value, start) {
+	let identifierStart = start;
+	for (let index = start; index <= value.length; index++) if (index === value.length || value.charCodeAt(index) === 46) {
+		if (!isValidPrereleaseIdentifier(value, identifierStart, index)) return false;
+		identifierStart = index + 1;
+	}
+	return true;
+}
+function parseCanonicalVersion(version) {
+	const prereleaseStart = version.indexOf("-");
+	const coreEnd = prereleaseStart === -1 ? version.length : prereleaseStart;
+	const firstDot = version.indexOf(".");
+	const secondDot = firstDot === -1 ? -1 : version.indexOf(".", firstDot + 1);
+	const thirdDot = secondDot === -1 ? -1 : version.indexOf(".", secondDot + 1);
+	const hasCanonicalCore = firstDot > 0 && secondDot > firstDot + 1 && secondDot < coreEnd && (thirdDot === -1 || thirdDot >= coreEnd) && isCanonicalNumericIdentifier(version, 0, firstDot) && isCanonicalNumericIdentifier(version, firstDot + 1, secondDot) && isCanonicalNumericIdentifier(version, secondDot + 1, coreEnd);
+	if (version.includes("+") || !hasCanonicalCore || prereleaseStart !== -1 && !isCanonicalPrerelease(version, prereleaseStart + 1)) throw new Error(`Version '${version}' must be canonical SemVer without build metadata`);
+	return {
+		version,
+		major: version.slice(0, firstDot),
+		minor: version.slice(firstDot + 1, secondDot),
+		patch: version.slice(secondDot + 1, coreEnd),
+		isPrerelease: prereleaseStart !== -1
+	};
+}
+function validateGitTag(tag) {
+	const hasForbiddenCharacter = Array.from(tag).some((character) => {
+		const codePoint = character.codePointAt(0);
+		return codePoint !== void 0 && (codePoint <= 32 || codePoint === 127) || GIT_TAG_FORBIDDEN_CHARACTERS.includes(character);
+	});
+	if (tag.length === 0 || tag.startsWith("/") || tag.endsWith("/") || tag.includes("//") || tag.includes("..") || tag.includes("@{") || tag.endsWith(".") || hasForbiddenCharacter || tag.split("/").some((part) => part.startsWith(".") || part.endsWith(".lock"))) throw new Error(`Invalid Git tag '${tag}'`);
+}
+function formatReleaseTags(version, tagTmpl) {
+	const canonicalVersion = parseCanonicalVersion(version);
+	const [prefix, suffix, ...additionalMarkers] = tagTmpl.split("{major}");
+	if (suffix === void 0 || additionalMarkers.length > 0) throw new Error("Tag template must contain exactly one {major} marker");
+	const exactTag = `${prefix}${canonicalVersion.version}${suffix}`;
+	const floatingTag = `${prefix}${canonicalVersion.major}${suffix}`;
+	validateGitTag(exactTag);
+	validateGitTag(floatingTag);
+	return {
+		exactTag,
+		floatingTag
+	};
+}
 function sanitizeBranchName(branch) {
 	const slug = branch.replace(CONVENTIONAL_PREFIX, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
 	if (!slug) throw new Error(`Branch '${branch}' does not produce a usable branch slug`);
@@ -20062,6 +20169,154 @@ function resolveVersionConflict(input) {
 	};
 }
 
+const COMMIT_SHA$1 = /^[0-9a-f]{40,64}$/;
+const TAG_REF_PREFIX = "refs/tags/";
+function isRecord(value) {
+	return typeof value === "object" && value !== null;
+}
+function isNotFound(error) {
+	return isRecord(error) && error.status === 404;
+}
+function readSha(value, label) {
+	if (typeof value !== "string" || !COMMIT_SHA$1.test(value)) throw new Error(`Malformed ${label} SHA from GitHub`);
+	return value;
+}
+function readObjectReference(value, label) {
+	if (!isRecord(value) || !isRecord(value.object)) throw new Error(`Malformed ${label} object from GitHub`);
+	const { type, sha } = value.object;
+	if (type !== "commit" && type !== "tag") throw new Error(`Malformed ${label} object type from GitHub`);
+	return {
+		type,
+		sha: readSha(sha, label)
+	};
+}
+function readAnnotatedTag(value) {
+	if (!isRecord(value) || !isRecord(value.object)) throw new Error("Malformed annotated tag object from GitHub");
+	const { type, sha } = value.object;
+	if (type !== "commit" && type !== "tag") throw new Error("Malformed annotated tag target type from GitHub");
+	return {
+		type,
+		sha: readSha(sha, "annotated tag target")
+	};
+}
+function readTagPage(value) {
+	if (Array.isArray(value)) return value;
+	if (isRecord(value) && Array.isArray(value.data)) return value.data;
+	throw new Error("Malformed tag page from GitHub");
+}
+function readTagName(value) {
+	if (!isRecord(value)) throw new Error("Malformed tag entry from GitHub");
+	if (typeof value.name === "string" && value.name.length > 0) return value.name;
+	if (typeof value.ref === "string" && value.ref.startsWith(TAG_REF_PREFIX) && value.ref.length > 10) return value.ref.slice(10);
+	throw new Error("Malformed tag entry from GitHub");
+}
+/** Loads the authoritative complete tag set before resolving a release version. */
+async function loadLiveTags(client) {
+	const tags = [];
+	for await (const page of client.listTagPages()) for (const tag of readTagPage(page)) tags.push(readTagName(tag));
+	return tags;
+}
+async function resolveTagCommit(client, exactTag) {
+	let reference;
+	try {
+		reference = await client.getRef(`tags/${exactTag}`);
+	} catch (error) {
+		if (isNotFound(error)) return null;
+		throw error;
+	}
+	let object = readObjectReference(reference, "exact tag reference");
+	const visited = /* @__PURE__ */ new Set();
+	while (object.type === "tag") {
+		if (visited.has(object.sha)) throw new Error(`Annotated tag '${exactTag}' contains a cycle`);
+		visited.add(object.sha);
+		object = readAnnotatedTag(await client.getGitObject(object.sha));
+	}
+	return object.sha;
+}
+async function loadExistingRelease(client, exactTag) {
+	try {
+		const response = await client.getReleaseByTag(exactTag);
+		if (!isRecord(response) || typeof response.draft !== "boolean" || typeof response.prerelease !== "boolean") throw new Error("Malformed release response from GitHub");
+		return {
+			draft: response.draft,
+			prerelease: response.prerelease
+		};
+	} catch (error) {
+		if (isNotFound(error)) return null;
+		throw error;
+	}
+}
+/** Inspects only the state that can be evaluated after the exact version is resolved. */
+async function loadResolvedReleaseState(input, client) {
+	validateGitTag(input.exactTag);
+	const branchReference = readObjectReference(await client.getRef(`heads/${input.branch}`), "branch reference");
+	if (branchReference.type !== "commit") throw new Error("Malformed branch reference target from GitHub");
+	const [exactTagCommit, existingRelease] = await Promise.all([resolveTagCommit(client, input.exactTag), loadExistingRelease(client, input.exactTag)]);
+	return {
+		exactTag: input.exactTag,
+		branchSha: branchReference.sha,
+		exactTagCommit,
+		existingRelease
+	};
+}
+function validateResolvedRelease(input, state) {
+	const canonicalVersion = parseCanonicalVersion(input.version);
+	const { exactTag, floatingTag } = formatReleaseTags(canonicalVersion.version, input.tagTmpl);
+	const expectedSha = readSha(input.expectedSha, "expected commit");
+	if (state.branchSha !== expectedSha) throw new Error(`Release SHA '${expectedSha}' is not the current branch head`);
+	if (state.exactTag !== exactTag) throw new Error(`Resolved exact tag '${exactTag}' does not match the inspected exact tag '${state.exactTag}'`);
+	if (state.exactTagCommit !== null && state.exactTagCommit !== expectedSha) throw new Error(`Exact tag '${exactTag}' points to another commit`);
+	if (state.existingRelease !== null) {
+		if (state.exactTagCommit === null) throw new Error(`existing release for '${exactTag}' has no matching exact tag`);
+		if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) throw new Error(`existing release for '${exactTag}' is not a matching published release`);
+	}
+	return {
+		exactTag,
+		floatingTag,
+		exactTagExists: state.exactTagCommit !== null
+	};
+}
+
+const BRANCH_REF_PREFIX = "refs/heads/";
+const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
+function getErrorMessage(error) {
+	return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+function getPreflightContext(token) {
+	if (!token) throw new Error("github-token is required when release-preflight is enabled");
+	const { ref, sha, repo } = context;
+	if (!ref.startsWith(BRANCH_REF_PREFIX)) throw new Error(`GitHub context ref '${ref}' must name a branch`);
+	const branch = ref.slice(11);
+	try {
+		validateGitTag(branch);
+	} catch {
+		throw new Error(`GitHub context ref '${ref}' is not a canonical branch ref`);
+	}
+	if (!COMMIT_SHA.test(sha)) throw new Error("GitHub context SHA must be a canonical commit SHA");
+	const octokit = getOctokit(token);
+	return {
+		branch,
+		expectedSha: sha,
+		client: {
+			getRef: async (gitRef) => (await octokit.rest.git.getRef({
+				...repo,
+				ref: gitRef
+			})).data,
+			listTagPages: () => octokit.paginate.iterator(octokit.rest.git.listMatchingRefs, {
+				...repo,
+				ref: "tags/"
+			}),
+			getGitObject: async (tagSha) => (await octokit.rest.git.getTag({
+				...repo,
+				tag_sha: tagSha
+			})).data,
+			getReleaseByTag: async (tag) => (await octokit.rest.repos.getReleaseByTag({
+				...repo,
+				tag
+			})).data
+		}
+	};
+}
 function getExistingTags(isPreRel) {
 	if (isPreRel) return [];
 	return listTagNames();
@@ -20077,7 +20332,15 @@ function getPreidCounter(isPreRel, counterBaseRef, packageJsonPath) {
 	return counterBaseRef ? getCommitCountSinceMergeBase(counterBaseRef) : getCommitCountSinceFileChange(packageJsonPath, void 0, "\"version\":");
 }
 async function run() {
-	const branch = context.ref.replace("refs/heads/", "");
+	const releasePreflight = getBooleanInput("release-preflight");
+	let preflight = null;
+	if (releasePreflight) try {
+		preflight = getPreflightContext(getInput("github-token"));
+	} catch (error) {
+		setFailed(getErrorMessage(error));
+		return;
+	}
+	const branch = preflight?.branch ?? context.ref.replace(BRANCH_REF_PREFIX, "");
 	let version = getInput("version");
 	const packageJsonDir = getInput("package-json-dir").replace(/^\/+|\/+$/g, "");
 	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
@@ -20119,7 +20382,13 @@ async function run() {
 	const isPreRel = resolvedPreid !== null;
 	const branchSlug = getBranchSlug(preidTemplate, branch);
 	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
-	const existingTags = getExistingTags(isPreRel);
+	let existingTags;
+	try {
+		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
+	} catch (error) {
+		setFailed(getErrorMessage(error));
+		return;
+	}
 	const commitCount = getPreidCounter(isPreRel, counterBaseRef, packageJsonPath);
 	info(`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`);
 	if (isPreRel) {
@@ -20156,6 +20425,22 @@ async function run() {
 		currentMajor: Number(major),
 		isLatest
 	});
+	let releaseValidation = null;
+	if (preflight !== null) try {
+		const { exactTag } = formatReleaseTags(buildVersion, tagTmpl);
+		const releaseState = await loadResolvedReleaseState({
+			branch,
+			exactTag
+		}, preflight.client);
+		releaseValidation = validateResolvedRelease({
+			expectedSha: preflight.expectedSha,
+			version: buildVersion,
+			tagTmpl
+		}, releaseState);
+	} catch (error) {
+		setFailed(getErrorMessage(error));
+		return;
+	}
 	notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
 	setOutput("version", buildVersion);
 	setOutput("baseVersion", baseVersion);
@@ -20169,6 +20454,10 @@ async function run() {
 	setOutput("isPrerelease", isPreRel);
 	setOutput("isLatest", isLatest);
 	setOutput("tag", tag);
+	if (releaseValidation !== null) {
+		setOutput("exactTag", releaseValidation.exactTag);
+		setOutput("floatingTag", releaseValidation.floatingTag);
+	}
 }
 
 run().catch((error) => {

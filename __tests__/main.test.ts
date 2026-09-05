@@ -9,7 +9,8 @@ import type * as utils from "../src/utils";
 
 vi.mock("@actions/core");
 vi.mock("@actions/github", () => ({
-	context: { ref: "refs/heads/feature/my-workflow" },
+	context: { ref: "refs/heads/feature/my-workflow", sha: "a".repeat(40), repo: { owner: "sketch7", repo: "version-builder-action" } },
+	getOctokit: vi.fn(),
 }));
 vi.mock("../src/utils", async importOriginal => {
 	const actual = await importOriginal<typeof utils>();
@@ -99,6 +100,193 @@ const dataset = [
 		},
 	},
 ];
+
+const EXPECTED_SHA = "a".repeat(40);
+
+function apiError(message: string, status?: number): Error & { status?: number } {
+	return Object.assign(new Error(message), { status });
+}
+
+function tagPage(...names: string[]): {
+	data: { ref: string; object: { type: "commit"; sha: string } }[];
+} {
+	return {
+		data: names.map(name => ({ ref: `refs/tags/${name}`, object: { type: "commit", sha: EXPECTED_SHA } })),
+	};
+}
+
+async function* tagPages(...pages: unknown[]): AsyncGenerator<unknown> {
+	for (const page of pages) {
+		yield page;
+	}
+}
+
+function mockPreflightInputs(overrides: Record<string, string> = {}): void {
+	vi.mocked(github).context = {
+		ref: "refs/heads/v3",
+		sha: EXPECTED_SHA,
+		repo: { owner: "sketch7", repo: "version-builder-action" },
+	} as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: "3.0.0",
+			preid: "dev",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+			"on-version-conflict": "bump-patch",
+			"tag-tmpl": "v{major}",
+			"release-preflight": "true",
+			"github-token": "test-token",
+			...overrides,
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockImplementation(name => name === "release-preflight");
+}
+
+function mockOctokit(
+	overrides: {
+		pages?: unknown[];
+		branchSha?: string;
+		listError?: Error;
+		getRef?: (ref: string) => Promise<unknown>;
+		getReleaseByTag?: (tag: string) => Promise<unknown>;
+	} = {},
+): { paginate: { iterator: ReturnType<typeof vi.fn> } } {
+	const octokit = {
+		paginate: {
+			iterator: vi.fn(() => {
+				if (overrides.listError) {
+					return failingTagPages(overrides.listError);
+				}
+				return tagPages(...(overrides.pages ?? [tagPage("v3.0.0", "v3.0.1", "v4.0.0")]));
+			}),
+		},
+		rest: {
+			git: {
+				listMatchingRefs: vi.fn(),
+				getRef: vi.fn(async ({ ref }: { ref: string }) => ({
+					data: await (overrides.getRef?.(ref) ?? Promise.resolve({ object: { type: "commit", sha: overrides.branchSha ?? EXPECTED_SHA } })),
+				})),
+				getTag: vi.fn(),
+			},
+			repos: {
+				getReleaseByTag: vi.fn(async ({ tag }: { tag: string }) => ({
+					data: await (overrides.getReleaseByTag?.(tag) ?? Promise.reject(apiError("Release not found", 404))),
+				})),
+			},
+		},
+	};
+	vi.mocked(github.getOctokit).mockReturnValue(octokit as never);
+	return octokit;
+}
+
+async function* failingTagPages(error: Error): AsyncGenerator<unknown> {
+	yield* tagPages();
+	throw error;
+}
+
+describe("release preflight", () => {
+	test("disabled preserves local versioning without reading a token or calling GitHub", async () => {
+		mockPreflightInputs({ "release-preflight": "false", "github-token": "must-not-be-read" });
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
+
+		await run();
+
+		expect(core.getInput).not.toHaveBeenCalledWith("github-token");
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(listTagNames).toHaveBeenCalledOnce();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.1");
+		expect(core.setOutput).not.toHaveBeenCalledWith("exactTag", expect.anything());
+	});
+
+	test.each([
+		["a non-branch ref", "refs/tags/v3", EXPECTED_SHA],
+		["a noncanonical commit SHA", "refs/heads/v3", "not-a-sha"],
+	])("enabled rejects %s before calling GitHub", async (_name, ref, sha) => {
+		mockPreflightInputs();
+		vi.mocked(github).context = {
+			ref,
+			sha,
+			repo: { owner: "sketch7", repo: "version-builder-action" },
+		} as typeof github.context;
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledOnce();
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("enabled rejects a missing token before emitting outputs or calling GitHub", async () => {
+		mockPreflightInputs({ "github-token": "" });
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith("github-token is required when release-preflight is enabled");
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("enabled resolves a stable bump from paginated live tags and emits validated release tags", async () => {
+		mockPreflightInputs();
+		const octokit = mockOctokit();
+		vi.mocked(listTagNames).mockReturnValue(["v99.0.0"]);
+
+		await run();
+
+		expect(github.getOctokit).toHaveBeenCalledWith("test-token");
+		expect(octokit.paginate.iterator).toHaveBeenCalledOnce();
+		expect(listTagNames).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
+		expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
+		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.2");
+		expect(core.setOutput).toHaveBeenCalledWith("floatingTag", "v3");
+	});
+
+	test("enabled validates and emits tags for a prerelease without consulting stable tags", async () => {
+		mockPreflightInputs({ "release-preflight": "true" });
+		vi.mocked(github).context = {
+			ref: "refs/heads/main",
+			sha: EXPECTED_SHA,
+			repo: { owner: "sketch7", repo: "version-builder-action" },
+		} as typeof github.context;
+		const octokit = mockOctokit();
+
+		await run();
+
+		expect(octokit.paginate.iterator).not.toHaveBeenCalled();
+		expect(listTagNames).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0-rc.0");
+		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.0-rc.0");
+		expect(core.setOutput).toHaveBeenCalledWith("floatingTag", "v3");
+	});
+
+	test("enabled rejects a stale branch before emitting any outputs", async () => {
+		mockPreflightInputs();
+		mockOctokit({ branchSha: "b".repeat(40) });
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("current branch head"));
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("enabled reports a live API failure without falling back to local tags", async () => {
+		mockPreflightInputs();
+		const error = apiError("API rate limit exceeded", 429);
+		mockOctokit({ listError: error });
+		vi.mocked(listTagNames).mockReturnValue([]);
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith("API rate limit exceeded");
+		expect(listTagNames).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+});
 
 test.each(dataset)("given $name - outputs should match expected", async ({ input, expected }) => {
 	vi.mocked(github).context = { ref: input.ref } as typeof github.context;

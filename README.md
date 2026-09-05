@@ -44,6 +44,12 @@ both semver and non-semver variants as outputs.
   `fail` stops the action if the tag already exists, `bump-patch`
   auto-increments the patch until a free tag is found. Git tags are the
   source of truth — nothing is committed back to `package.json`.
+- `release-preflight` is opt-in. When enabled, it uses GitHub's live,
+  paginated tag, branch, exact-tag, and release state before emitting a
+  publishable plan. Its token requires `contents: read`; authentication,
+  authorization, rate-limit, transport, and malformed-response failures stop
+  the action without falling back to local tags. When disabled (the default),
+  no token is read and existing local-tag behavior is unchanged.
 
 ## Inputs
 
@@ -61,6 +67,8 @@ both semver and non-semver variants as outputs.
 | `force-stable`        | No       | `false`                                    | Forces stable versioning regardless of the current branch.                                                                                                             |
 | `tag-tmpl`            | No       | `v{major}`                                 | Template for parsing local stable tags to select `latest` or `v{major}-lts`, and for checking version conflicts. `{major}` is replaced with the major version number.  |
 | `on-version-conflict` | No       | `ignore`                                   | Behavior when a stable version's git tag already exists: `ignore` (no check, fully backward compatible), `fail`, or `bump-patch` (auto-increments the patch).          |
+| `release-preflight`   | No       | `false`                                    | Enables fail-closed live GitHub release validation. Requires `github-token`.                                                                                           |
+| `github-token`        | No       | _(empty)_                                  | Token read only for enabled preflight. The calling job needs `contents: read`.                                                                                         |
 
 ## Outputs
 
@@ -78,6 +86,8 @@ both semver and non-semver variants as outputs.
 | `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                                                         |
 | `isLatest`     | `false`       | Whether a stable version belongs to the highest major parsed from matching local stable tags; always `false` for prereleases.          |
 | `tag`          | `latest`      | Dist-tag for the build: formatted preid label when pre-release (e.g. `rc`), otherwise `latest` or `v{major}-lts` from local tags.      |
+| `exactTag`     | `v1.5.6`      | Exact Git tag derived from the final validated version; set only when `release-preflight` is enabled.                                  |
+| `floatingTag`  | `v1`          | Floating major Git tag derived from the final validated version; set only when `release-preflight` is enabled.                         |
 
 ## Branch Behavior (defaults)
 
@@ -213,6 +223,45 @@ publish would fail partway through the build. Opt-in; the default
   with:
     on-version-conflict: "bump-patch" # or "fail" to stop instead of bumping
 ```
+
+### Preflight a package release
+
+Use live preflight before building or publishing an immutable package. The
+resolved `version` is the single authority for the rest of the release; use
+`exactTag` and `floatingTag` rather than deriving tags again.
+
+```yaml
+permissions:
+  contents: read
+  packages: write
+
+steps:
+  - uses: actions/checkout@v7
+    with:
+      fetch-depth: 0
+
+  - name: Resolve and preflight package release
+    id: version
+    uses: sketch7/version-builder-action@v3
+    with:
+      version: "1.5.6"
+      force-stable: "true"
+      on-version-conflict: "bump-patch"
+      release-preflight: "true"
+      github-token: ${{ github.token }}
+
+  - name: Publish the resolved package
+    run: npm publish --tag "${{ steps.version.outputs.tag }}"
+```
+
+An existing exact tag is accepted only when it matches the triggering commit;
+an existing published GitHub Release must also have matching prerelease state.
+This permits recovery by rerunning a partially completed release. A mismatched
+tag, draft release, or wrong release kind fails before package publication.
+Preflight cannot remove races introduced by later mutations: immediately before
+creating/moving Git tags or marking a release latest, revalidate the branch
+head and relevant release/tag state. Do not recalculate the version during that
+finalization.
 
 ### Sub-package in a monorepo
 

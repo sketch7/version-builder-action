@@ -4,9 +4,12 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { readFile } from "fs/promises";
 
+import { loadLiveTags, loadResolvedReleaseState, validateResolvedRelease } from "./release-preflight";
+import type { ReleasePreflightClient, ReleaseValidation } from "./release-preflight";
 import {
 	coerceArray,
 	formatPreid,
+	formatReleaseTags,
 	getCommitCountSinceFileChange,
 	getCommitCountSinceMergeBase,
 	isLatestStableMajor,
@@ -17,9 +20,53 @@ import {
 	resolveVersionConflict,
 	sanitizeBranchName,
 	stripPreid,
+	validateGitTag,
 	validatePrereleaseSuffix,
 } from "./utils";
 import type { VersionConflictMode } from "./utils";
+
+const BRANCH_REF_PREFIX = "refs/heads/";
+const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
+
+interface PreflightContext {
+	branch: string;
+	expectedSha: string;
+	client: ReleasePreflightClient;
+}
+
+function getErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+
+function getPreflightContext(token: string): PreflightContext {
+	if (!token) {
+		throw new Error("github-token is required when release-preflight is enabled");
+	}
+
+	const { ref, sha, repo } = github.context;
+	if (!ref.startsWith(BRANCH_REF_PREFIX)) {
+		throw new Error(`GitHub context ref '${ref}' must name a branch`);
+	}
+	const branch = ref.slice(BRANCH_REF_PREFIX.length);
+	try {
+		validateGitTag(branch);
+	} catch {
+		throw new Error(`GitHub context ref '${ref}' is not a canonical branch ref`);
+	}
+	if (!COMMIT_SHA.test(sha)) {
+		throw new Error("GitHub context SHA must be a canonical commit SHA");
+	}
+
+	const octokit = github.getOctokit(token);
+	const client: ReleasePreflightClient = {
+		getRef: async gitRef => (await octokit.rest.git.getRef({ ...repo, ref: gitRef })).data,
+		listTagPages: () => octokit.paginate.iterator(octokit.rest.git.listMatchingRefs, { ...repo, ref: "tags/" }),
+		getGitObject: async tagSha => (await octokit.rest.git.getTag({ ...repo, tag_sha: tagSha })).data,
+		getReleaseByTag: async tag => (await octokit.rest.repos.getReleaseByTag({ ...repo, tag })).data,
+	};
+
+	return { branch, expectedSha: sha, client };
+}
 
 function getExistingTags(isPreRel: boolean): string[] {
 	if (isPreRel) {
@@ -43,8 +90,19 @@ function getPreidCounter(isPreRel: boolean, counterBaseRef: string, packageJsonP
 	return counterBaseRef ? getCommitCountSinceMergeBase(counterBaseRef) : getCommitCountSinceFileChange(packageJsonPath, undefined, '"version":');
 }
 
+// oxlint-disable-next-line complexity -- The public action contract resolves its inputs in one ordered workflow.
 export async function run(): Promise<void> {
-	const branch = github.context.ref.replace("refs/heads/", "");
+	const releasePreflight = core.getBooleanInput("release-preflight");
+	let preflight: PreflightContext | null = null;
+	if (releasePreflight) {
+		try {
+			preflight = getPreflightContext(core.getInput("github-token"));
+		} catch (error) {
+			core.setFailed(getErrorMessage(error));
+			return;
+		}
+	}
+	const branch = preflight?.branch ?? github.context.ref.replace(BRANCH_REF_PREFIX, "");
 
 	let version = core.getInput("version");
 	const packageJsonDir = core.getInput("package-json-dir").replace(/^\/+|\/+$/g, "");
@@ -81,7 +139,13 @@ export async function run(): Promise<void> {
 	const isPreRel = resolvedPreid !== null;
 	const branchSlug = getBranchSlug(preidTemplate, branch);
 	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
-	const existingTags = getExistingTags(isPreRel);
+	let existingTags: string[];
+	try {
+		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
+	} catch (error) {
+		core.setFailed(getErrorMessage(error));
+		return;
+	}
 	const commitCount = getPreidCounter(isPreRel, counterBaseRef, packageJsonPath);
 	core.info(
 		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
@@ -124,6 +188,17 @@ export async function run(): Promise<void> {
 
 	const isLatest = isPreRel ? false : isLatestStableMajor(Number(major), existingTags, tagTmpl);
 	const tag = resolveTag({ resolvedPreid: formattedPreid, currentMajor: Number(major), isLatest });
+	let releaseValidation: ReleaseValidation | null = null;
+	if (preflight !== null) {
+		try {
+			const { exactTag } = formatReleaseTags(buildVersion, tagTmpl);
+			const releaseState = await loadResolvedReleaseState({ branch, exactTag }, preflight.client);
+			releaseValidation = validateResolvedRelease({ expectedSha: preflight.expectedSha, version: buildVersion, tagTmpl }, releaseState);
+		} catch (error) {
+			core.setFailed(getErrorMessage(error));
+			return;
+		}
+	}
 
 	core.notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
 	core.setOutput("version", buildVersion);
@@ -138,4 +213,8 @@ export async function run(): Promise<void> {
 	core.setOutput("isPrerelease", isPreRel);
 	core.setOutput("isLatest", isLatest);
 	core.setOutput("tag", tag);
+	if (releaseValidation !== null) {
+		core.setOutput("exactTag", releaseValidation.exactTag);
+		core.setOutput("floatingTag", releaseValidation.floatingTag);
+	}
 }
