@@ -116,6 +116,7 @@ describe("loadResolvedReleaseState", () => {
 		});
 
 		await expect(loadResolvedReleaseState(loadInput, client)).resolves.toEqual({
+			exactTag: "v1.2.3",
 			branchSha: EXPECTED_SHA,
 			exactTagCommit: null,
 			existingRelease: null,
@@ -217,9 +218,26 @@ describe("loadResolvedReleaseState", () => {
 });
 
 describe("validateResolvedRelease", () => {
+	test("rejects a resolved version whose exact tag was not inspected", async () => {
+		const state = await loadResolvedReleaseState(loadInput, createClient());
+
+		expect(() => validateResolvedRelease({ ...validationInput, version: "1.2.4" }, state)).toThrow("inspected exact tag");
+	});
+
+	test("accepts a loaded matching tag with a matching existing release", async () => {
+		const client = createClient({
+			getRef: async () => ({ object: { type: "commit", sha: EXPECTED_SHA } }),
+			getReleaseByTag: async () => ({ draft: false, prerelease: false }),
+		});
+		const state = await loadResolvedReleaseState(loadInput, client);
+
+		expect(validateResolvedRelease(validationInput, state)).toEqual({ exactTag: "v1.2.3", floatingTag: "v1", exactTagExists: true });
+	});
+
 	test("derives matching exact and floating tags from the canonical version", () => {
 		expect(
 			validateResolvedRelease(validationInput, {
+				exactTag: "v1.2.3",
 				branchSha: EXPECTED_SHA,
 				exactTagCommit: EXPECTED_SHA,
 				existingRelease: { draft: false, prerelease: false },
@@ -230,6 +248,7 @@ describe("validateResolvedRelease", () => {
 	test("rejects a stale branch", () => {
 		expect(() =>
 			validateResolvedRelease(validationInput, {
+				exactTag: "v1.2.3",
 				branchSha: OTHER_SHA,
 				exactTagCommit: null,
 				existingRelease: null,
@@ -240,6 +259,7 @@ describe("validateResolvedRelease", () => {
 	test("rejects an exact tag pointing to another commit", () => {
 		expect(() =>
 			validateResolvedRelease(validationInput, {
+				exactTag: "v1.2.3",
 				branchSha: EXPECTED_SHA,
 				exactTagCommit: OTHER_SHA,
 				existingRelease: null,
@@ -253,6 +273,7 @@ describe("validateResolvedRelease", () => {
 	])("rejects a %s existing release", (_name, existingRelease) => {
 		expect(() =>
 			validateResolvedRelease(validationInput, {
+				exactTag: "v1.2.3",
 				branchSha: EXPECTED_SHA,
 				exactTagCommit: EXPECTED_SHA,
 				existingRelease,
@@ -263,6 +284,7 @@ describe("validateResolvedRelease", () => {
 	test("rejects an existing release without its exact tag", () => {
 		expect(() =>
 			validateResolvedRelease(validationInput, {
+				exactTag: "v1.2.3",
 				branchSha: EXPECTED_SHA,
 				exactTagCommit: null,
 				existingRelease: { draft: false, prerelease: false },
@@ -275,6 +297,7 @@ describe("validateResolvedRelease", () => {
 			validateResolvedRelease(
 				{ ...validationInput, version: "1.2.3-rc.4" },
 				{
+					exactTag: "v1.2.3-rc.4",
 					branchSha: EXPECTED_SHA,
 					exactTagCommit: EXPECTED_SHA,
 					existingRelease: { draft: false, prerelease: true },

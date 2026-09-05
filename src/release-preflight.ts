@@ -9,6 +9,7 @@ export interface ExistingRelease {
 }
 
 export interface ReleaseState {
+	exactTag: string;
 	branchSha: string;
 	exactTagCommit: string | null;
 	existingRelease: ExistingRelease | null;
@@ -168,7 +169,7 @@ export async function loadResolvedReleaseState(input: LoadResolvedReleaseStateIn
 		resolveTagCommit(client, input.exactTag),
 		loadExistingRelease(client, input.exactTag),
 	]);
-	return { branchSha: branchReference.sha, exactTagCommit, existingRelease };
+	return { exactTag: input.exactTag, branchSha: branchReference.sha, exactTagCommit, existingRelease };
 }
 
 export function validateResolvedRelease(input: ValidateResolvedReleaseInput, state: ReleaseState): ReleaseValidation {
@@ -178,6 +179,9 @@ export function validateResolvedRelease(input: ValidateResolvedReleaseInput, sta
 
 	if (state.branchSha !== expectedSha) {
 		throw new Error(`Release SHA '${expectedSha}' is not the current branch head`);
+	}
+	if (state.exactTag !== exactTag) {
+		throw new Error(`Resolved exact tag '${exactTag}' does not match the inspected exact tag '${state.exactTag}'`);
 	}
 	if (state.exactTagCommit !== null && state.exactTagCommit !== expectedSha) {
 		throw new Error(`Exact tag '${exactTag}' points to another commit`);
