@@ -42,7 +42,7 @@ export interface ReleasePreflightClient {
 	getRef: (ref: string) => Promise<unknown>;
 	listTagPages: () => AsyncIterable<unknown>;
 	getGitObject: (sha: string) => Promise<unknown>;
-	getReleaseByTag: (tag: string) => Promise<unknown>;
+	listReleasePages: () => AsyncIterable<unknown>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -107,6 +107,29 @@ function readTagName(value: unknown): string {
 	throw new Error("Malformed tag entry from GitHub");
 }
 
+function readReleasePage(value: unknown): unknown[] {
+	if (Array.isArray(value)) {
+		return value;
+	}
+	if (isRecord(value) && Array.isArray(value.data)) {
+		return value.data;
+	}
+	throw new Error("Malformed release page from GitHub");
+}
+
+function readRelease(value: unknown): { tagName: string; release: ExistingRelease } {
+	if (
+		!isRecord(value) ||
+		typeof value.tag_name !== "string" ||
+		value.tag_name.length === 0 ||
+		typeof value.draft !== "boolean" ||
+		typeof value.prerelease !== "boolean"
+	) {
+		throw new Error("Malformed release entry from GitHub");
+	}
+	return { tagName: value.tag_name, release: { draft: value.draft, prerelease: value.prerelease } };
+}
+
 /** Loads the authoritative complete tag set before resolving a release version. */
 export async function loadLiveTags(client: ReleasePreflightClient): Promise<string[]> {
 	const tags: string[] = [];
@@ -143,18 +166,20 @@ async function resolveTagCommit(client: ReleasePreflightClient, exactTag: string
 }
 
 async function loadExistingRelease(client: ReleasePreflightClient, exactTag: string): Promise<ExistingRelease | null> {
-	try {
-		const response = await client.getReleaseByTag(exactTag);
-		if (!isRecord(response) || typeof response.draft !== "boolean" || typeof response.prerelease !== "boolean") {
-			throw new Error("Malformed release response from GitHub");
+	let matchingRelease: ExistingRelease | null = null;
+	for await (const page of client.listReleasePages()) {
+		for (const value of readReleasePage(page)) {
+			const { tagName, release } = readRelease(value);
+			if (tagName !== exactTag) {
+				continue;
+			}
+			if (matchingRelease !== null) {
+				throw new Error(`Ambiguous releases for '${exactTag}'`);
+			}
+			matchingRelease = release;
 		}
-		return { draft: response.draft, prerelease: response.prerelease };
-	} catch (error) {
-		if (isNotFound(error)) {
-			return null;
-		}
-		throw error;
 	}
+	return matchingRelease;
 }
 
 /** Inspects only the state that can be evaluated after the exact version is resolved. */
@@ -170,6 +195,36 @@ export async function loadResolvedReleaseState(input: LoadResolvedReleaseStateIn
 		loadExistingRelease(client, input.exactTag),
 	]);
 	return { exactTag: input.exactTag, branchSha: branchReference.sha, exactTagCommit, existingRelease };
+}
+
+/** Returns whether the inspected exact tag and published release can be recovered in place. */
+export function isMatchingReleaseRecovery(input: ValidateResolvedReleaseInput, state: ReleaseState): boolean {
+	const canonicalVersion = parseCanonicalVersion(input.version);
+	const { exactTag } = formatReleaseTags(canonicalVersion.version, input.tagTmpl);
+	const expectedSha = readSha(input.expectedSha, "expected commit");
+
+	if (state.branchSha !== expectedSha) {
+		throw new Error(`Release SHA '${expectedSha}' is not the current branch head`);
+	}
+	if (state.exactTag !== exactTag) {
+		throw new Error(`Resolved exact tag '${exactTag}' does not match the inspected exact tag '${state.exactTag}'`);
+	}
+	if (state.exactTagCommit === null) {
+		if (state.existingRelease !== null) {
+			throw new Error(`existing release for '${exactTag}' has no matching exact tag`);
+		}
+		return false;
+	}
+	if (state.exactTagCommit !== expectedSha) {
+		return false;
+	}
+	if (state.existingRelease === null) {
+		return false;
+	}
+	if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) {
+		throw new Error(`existing release for '${exactTag}' is not a matching published release`);
+	}
+	return true;
 }
 
 export function validateResolvedRelease(input: ValidateResolvedReleaseInput, state: ReleaseState): ReleaseValidation {

@@ -46,10 +46,12 @@ both semver and non-semver variants as outputs.
   source of truth — nothing is committed back to `package.json`.
 - `release-preflight` is opt-in. When enabled, it uses GitHub's live,
   paginated tag, branch, exact-tag, and release state before emitting a
-  publishable plan. Its token requires `contents: read`; authentication,
-  authorization, rate-limit, transport, and malformed-response failures stop
-  the action without falling back to local tags. When disabled (the default),
-  no token is read and existing local-tag behavior is unchanged.
+  publishable plan. Its token requires `contents: write` so GitHub includes
+  draft releases in the paginated release listing; the action only reads this
+  state and never mutates releases. Authentication, authorization, rate-limit,
+  transport, and malformed-response failures stop the action without falling
+  back to local tags. When disabled (the default), no token is read and
+  existing local-tag behavior is unchanged.
 
 ## Inputs
 
@@ -68,26 +70,26 @@ both semver and non-semver variants as outputs.
 | `tag-tmpl`            | No       | `v{major}`                                 | Template for parsing local stable tags to select `latest` or `v{major}-lts`, and for checking version conflicts. `{major}` is replaced with the major version number.  |
 | `on-version-conflict` | No       | `ignore`                                   | Behavior when a stable version's git tag already exists: `ignore` (no check, fully backward compatible), `fail`, or `bump-patch` (auto-increments the patch).          |
 | `release-preflight`   | No       | `false`                                    | Enables fail-closed live GitHub release validation. Requires `github-token`.                                                                                           |
-| `github-token`        | No       | _(empty)_                                  | Token read only for enabled preflight. The calling job needs `contents: read`.                                                                                         |
+| `github-token`        | No       | _(empty)_                                  | Token read only for enabled preflight. The calling job needs `contents: write` so paginated release listings include drafts; the action never mutates releases.        |
 
 ## Outputs
 
-| Output         | Example       | Description                                                                                                                            |
-| -------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable. Patch is bumped when `on-version-conflict: bump-patch` resolved a tag collision. |
-| `baseVersion`  | `1.5.6`       | Base version without any pre-release suffix (from the `version` input or `package.json`).                                              |
-| `fileVersion`  | `1.5.6.5`     | 4-part numeric version for non-semver consumers (e.g. .NET assembly version); plain version when stable.                               |
-| `majorVersion` | `1`           | Major version segment.                                                                                                                 |
-| `minorVersion` | `5`           | Minor version segment.                                                                                                                 |
-| `patchVersion` | `6`           | Patch version segment.                                                                                                                 |
-| `preid`        | `dev`         | The preid string when pre-release, otherwise an empty string.                                                                          |
-| `preidCounter` | `5`           | The numeric counter appended after the preid (e.g. `5` for `-dev.5`), otherwise an empty string.                                       |
-| `branchSlug`   | `my-feature`  | Normalized branch slug used by `{branch}` in `preid-template`; empty when the template does not use `{branch}`.                        |
-| `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                                                         |
-| `isLatest`     | `false`       | Whether a stable version belongs to the highest major parsed from matching local stable tags; always `false` for prereleases.          |
-| `tag`          | `latest`      | Dist-tag for the build: formatted preid label when pre-release (e.g. `rc`), otherwise `latest` or `v{major}-lts` from local tags.      |
-| `exactTag`     | `v1.5.6`      | Exact Git tag derived from the final validated version; set only when `release-preflight` is enabled.                                  |
-| `floatingTag`  | `v1`          | Floating major Git tag derived from the final validated version; set only when `release-preflight` is enabled.                         |
+| Output         | Example       | Description                                                                                                                                                                                                        |
+| -------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable. Patch is bumped when `on-version-conflict: bump-patch` resolved a tag collision.                                                                             |
+| `baseVersion`  | `1.5.6`       | Base version without any pre-release suffix (from the `version` input or `package.json`).                                                                                                                          |
+| `fileVersion`  | `1.5.6.5`     | 4-part numeric version for non-semver consumers (e.g. .NET assembly version); plain version when stable.                                                                                                           |
+| `majorVersion` | `1`           | Major version segment.                                                                                                                                                                                             |
+| `minorVersion` | `5`           | Minor version segment.                                                                                                                                                                                             |
+| `patchVersion` | `6`           | Patch version segment.                                                                                                                                                                                             |
+| `preid`        | `dev`         | The preid string when pre-release, otherwise an empty string.                                                                                                                                                      |
+| `preidCounter` | `5`           | The numeric counter appended after the preid (e.g. `5` for `-dev.5`), otherwise an empty string.                                                                                                                   |
+| `branchSlug`   | `my-feature`  | Normalized branch slug used by `{branch}` in `preid-template`; empty when the template does not use `{branch}`.                                                                                                    |
+| `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                                                                                                                                     |
+| `isLatest`     | `false`       | Whether a stable version belongs to the highest major parsed from matching stable tags; default mode uses local tags, while `release-preflight` uses live GitHub tags. Always `false` for prereleases.             |
+| `tag`          | `latest`      | Dist-tag for the build: formatted preid label when pre-release (e.g. `rc`), otherwise `latest` or `v{major}-lts`; stable-major selection uses local tags by default and live GitHub tags with `release-preflight`. |
+| `exactTag`     | `v1.5.6`      | Exact Git tag derived from the final validated version; set only when `release-preflight` is enabled.                                                                                                              |
+| `floatingTag`  | `v1`          | Floating major Git tag derived from the final validated version; set only when `release-preflight` is enabled.                                                                                                     |
 
 ## Branch Behavior (defaults)
 
@@ -232,7 +234,9 @@ resolved `version` is the single authority for the rest of the release; use
 
 ```yaml
 permissions:
-  contents: read
+  # write is required so the release listing includes draft releases.
+  # The action itself only reads GitHub state; it never mutates releases.
+  contents: write
   packages: write
 
 steps:
@@ -250,6 +254,15 @@ steps:
       release-preflight: "true"
       github-token: ${{ github.token }}
 
+  - name: Apply the resolved package version
+    run: npm version "${{ steps.version.outputs.version }}" --allow-same-version=true --git-tag-version=false
+
+  - name: Build
+    run: npm run build
+
+  - name: Pack
+    run: npm pack
+
   - name: Publish the resolved package
     run: npm publish --tag "${{ steps.version.outputs.tag }}"
 ```
@@ -261,7 +274,8 @@ tag, draft release, or wrong release kind fails before package publication.
 Preflight cannot remove races introduced by later mutations: immediately before
 creating/moving Git tags or marking a release latest, revalidate the branch
 head and relevant release/tag state. Do not recalculate the version during that
-finalization.
+finalization. The action never creates, updates, or deletes Git tags or GitHub
+Releases.
 
 ### Sub-package in a monorepo
 

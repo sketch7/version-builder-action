@@ -25,6 +25,32 @@ function tagPage(...names: string[]): { data: { ref: string; node_id: string; ur
 	};
 }
 
+function releaseRecord(tagName: string, draft = false, prerelease = false): Record<string, unknown> {
+	return {
+		url: `https://api.github.com/repos/octocat/example/releases/${tagName}`,
+		assets_url: `https://api.github.com/repos/octocat/example/releases/${tagName}/assets`,
+		upload_url: `https://uploads.github.com/repos/octocat/example/releases/${tagName}/assets{?name,label}`,
+		html_url: `https://github.com/octocat/example/releases/tag/${tagName}`,
+		id: 1,
+		node_id: "MDc6UmVsZWFzZTE=",
+		tag_name: tagName,
+		target_commitish: "main",
+		name: tagName,
+		body: "Release notes",
+		draft,
+		prerelease,
+		created_at: "2026-09-05T12:00:00Z",
+		published_at: draft ? null : "2026-09-05T12:00:00Z",
+		assets: [],
+		tarball_url: `https://api.github.com/repos/octocat/example/tarball/${tagName}`,
+		zipball_url: `https://api.github.com/repos/octocat/example/zipball/${tagName}`,
+	};
+}
+
+function releasePage(...releases: unknown[]): { data: unknown[] } {
+	return { data: releases };
+}
+
 function annotatedTag(target: { type: string; sha: string }): {
 	node_id: string;
 	tag: string;
@@ -68,11 +94,13 @@ function createClient(overrides: Partial<ReleasePreflightClient> = {}): ReleaseP
 		},
 		listTagPages: () => tagPages(tagPage("v1.2.3")),
 		getGitObject: async sha => ({ type: "commit", sha }),
-		getReleaseByTag: async () => {
-			throw apiError("Release not found", 404);
-		},
+		listReleasePages: () => tagPages(releasePage()),
 		...overrides,
 	};
+}
+
+function withReleasePages(client: ReleasePreflightClient, ...pages: unknown[]): ReleasePreflightClient {
+	return Object.assign(client, { listReleasePages: () => tagPages(...pages) });
 }
 
 const loadInput = { branch: "main", exactTag: "v1.2.3" };
@@ -106,6 +134,40 @@ describe("loadLiveTags", () => {
 });
 
 describe("loadResolvedReleaseState", () => {
+	test("loads a matching release from a later paginated release page", async () => {
+		const client = withReleasePages(createClient(), releasePage(releaseRecord("v9.0.0")), releasePage(releaseRecord("v1.2.3")));
+
+		await expect(loadResolvedReleaseState(loadInput, client)).resolves.toMatchObject({ existingRelease: { draft: false, prerelease: false } });
+	});
+
+	test("surfaces a visible draft release so validation rejects it", async () => {
+		const client = withReleasePages(createClient(), releasePage(releaseRecord("v1.2.3", true)));
+		const state = await loadResolvedReleaseState(loadInput, client);
+
+		expect(() => validateResolvedRelease(validationInput, { ...state, exactTagCommit: EXPECTED_SHA })).toThrow("existing release");
+	});
+
+	test("rejects duplicate exact-tag releases as ambiguous", async () => {
+		const client = withReleasePages(createClient(), releasePage(releaseRecord("v1.2.3")), releasePage(releaseRecord("v1.2.3", true)));
+
+		await expect(loadResolvedReleaseState(loadInput, client)).rejects.toThrow(/ambiguous/i);
+	});
+
+	test("rejects an uninspectable release page instead of treating the release as absent", async () => {
+		const client = withReleasePages(createClient(), { data: { tag_name: "v1.2.3", draft: true, prerelease: false } });
+
+		await expect(loadResolvedReleaseState(loadInput, client)).rejects.toThrow("Malformed release page");
+	});
+
+	test("propagates release pagination failures after an earlier page", async () => {
+		const error = apiError("API rate limit exceeded", 429);
+		const client = Object.assign(createClient(), {
+			listReleasePages: () => failingTagPages(error, releasePage(releaseRecord("v9.0.0"))),
+		}) as ReleasePreflightClient;
+
+		await expect(loadResolvedReleaseState(loadInput, client)).rejects.toBe(error);
+	});
+
 	test("does not load tags again after resolution", async () => {
 		let tagPagesRead = false;
 		const client = createClient({
@@ -198,7 +260,7 @@ describe("loadResolvedReleaseState", () => {
 			getRef: async ref => (ref === "heads/main" ? { object: { type: "commit", sha: EXPECTED_SHA } } : Promise.reject(error)),
 		});
 		await expect(loadResolvedReleaseState(loadInput, exactTagClient)).rejects.toBe(error);
-		await expect(loadResolvedReleaseState(loadInput, createClient({ getReleaseByTag: async () => Promise.reject(error) }))).rejects.toBe(error);
+		await expect(loadResolvedReleaseState(loadInput, createClient({ listReleasePages: () => failingTagPages(error) }))).rejects.toBe(error);
 	});
 
 	test.each([
@@ -211,7 +273,7 @@ describe("loadResolvedReleaseState", () => {
 				getGitObject: async () => ({ object: { type: "commit", sha: 42 } }),
 			}),
 		],
-		["release", createClient({ getReleaseByTag: async () => ({ draft: false, prerelease: "false" }) })],
+		["release", createClient({ listReleasePages: () => tagPages(releasePage({ tag_name: "v1.2.3", draft: false, prerelease: "false" })) })],
 	])("rejects malformed %s responses", async (_name, client) => {
 		await expect(loadResolvedReleaseState(loadInput, client)).rejects.toThrow();
 	});
@@ -227,7 +289,7 @@ describe("validateResolvedRelease", () => {
 	test("accepts a loaded matching tag with a matching existing release", async () => {
 		const client = createClient({
 			getRef: async () => ({ object: { type: "commit", sha: EXPECTED_SHA } }),
-			getReleaseByTag: async () => ({ draft: false, prerelease: false }),
+			listReleasePages: () => tagPages(releasePage(releaseRecord("v1.2.3"))),
 		});
 		const state = await loadResolvedReleaseState(loadInput, client);
 

@@ -115,6 +115,14 @@ function tagPage(...names: string[]): {
 	};
 }
 
+function releasePage(...releases: unknown[]): { data: unknown[] } {
+	return { data: releases };
+}
+
+function releaseRecord(tagName: string, draft = false, prerelease = false): Record<string, unknown> {
+	return { tag_name: tagName, draft, prerelease };
+}
+
 async function* tagPages(...pages: unknown[]): AsyncGenerator<unknown> {
 	for (const page of pages) {
 		yield page;
@@ -148,38 +156,51 @@ function mockPreflightInputs(overrides: Record<string, string> = {}): void {
 function mockOctokit(
 	overrides: {
 		pages?: unknown[];
+		releasePages?: unknown[];
 		branchSha?: string;
 		listError?: Error;
+		releaseError?: Error;
 		getRef?: (ref: string) => Promise<unknown>;
-		getReleaseByTag?: (tag: string) => Promise<unknown>;
 	} = {},
-): { paginate: { iterator: ReturnType<typeof vi.fn> } } {
+): { paginate: { iterator: ReturnType<typeof vi.fn> }; tagIterator: ReturnType<typeof vi.fn>; releaseIterator: ReturnType<typeof vi.fn> } {
+	const listMatchingRefs = vi.fn();
+	const listReleases = vi.fn();
+	const tagIterator = vi.fn(() => {
+		if (overrides.listError) {
+			return failingTagPages(overrides.listError);
+		}
+		return tagPages(...(overrides.pages ?? [tagPage("v3.0.0"), tagPage("v3.0.1", "v4.0.0")]));
+	});
+	const releaseIterator = vi.fn(() => {
+		if (overrides.releaseError) {
+			return failingTagPages(overrides.releaseError);
+		}
+		return tagPages(...(overrides.releasePages ?? [releasePage(releaseRecord("v9.0.0")), releasePage(releaseRecord("v8.0.0"))]));
+	});
 	const octokit = {
 		paginate: {
-			iterator: vi.fn(() => {
-				if (overrides.listError) {
-					return failingTagPages(overrides.listError);
+			iterator: vi.fn((endpoint: unknown) => {
+				if (endpoint === listMatchingRefs) {
+					return tagIterator();
 				}
-				return tagPages(...(overrides.pages ?? [tagPage("v3.0.0", "v3.0.1", "v4.0.0")]));
+				return releaseIterator();
 			}),
 		},
 		rest: {
 			git: {
-				listMatchingRefs: vi.fn(),
+				listMatchingRefs,
 				getRef: vi.fn(async ({ ref }: { ref: string }) => ({
 					data: await (overrides.getRef?.(ref) ?? Promise.resolve({ object: { type: "commit", sha: overrides.branchSha ?? EXPECTED_SHA } })),
 				})),
 				getTag: vi.fn(),
 			},
 			repos: {
-				getReleaseByTag: vi.fn(async ({ tag }: { tag: string }) => ({
-					data: await (overrides.getReleaseByTag?.(tag) ?? Promise.reject(apiError("Release not found", 404))),
-				})),
+				listReleases,
 			},
 		},
 	};
 	vi.mocked(github.getOctokit).mockReturnValue(octokit as never);
-	return octokit;
+	return { ...octokit, tagIterator, releaseIterator };
 }
 
 async function* failingTagPages(error: Error): AsyncGenerator<unknown> {
@@ -238,12 +259,78 @@ describe("release preflight", () => {
 		await run();
 
 		expect(github.getOctokit).toHaveBeenCalledWith("test-token");
-		expect(octokit.paginate.iterator).toHaveBeenCalledOnce();
+		expect(octokit.tagIterator).toHaveBeenCalledOnce();
 		expect(listTagNames).not.toHaveBeenCalled();
 		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
 		expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
 		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.2");
 		expect(core.setOutput).toHaveBeenCalledWith("floatingTag", "v3");
+	});
+
+	test.each(["bump-patch", "fail"])("enabled recovers a matching exact tag before applying the %s conflict policy", async onVersionConflict => {
+		mockPreflightInputs({ "on-version-conflict": onVersionConflict });
+		const octokit = mockOctokit({
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/v3.0.0") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+			releasePages: [releasePage(releaseRecord("v3.0.0"))],
+		});
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
+		expect(core.setOutput).toHaveBeenCalledWith("baseVersion", "3.0.0");
+		expect(core.setOutput).toHaveBeenCalledWith("patchVersion", "0");
+		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.0");
+		expect(octokit.tagIterator).toHaveBeenCalledOnce();
+	});
+
+	test("enabled preserves a matching exact tag with the ignore conflict policy", async () => {
+		mockPreflightInputs({ "on-version-conflict": "ignore" });
+		mockOctokit({
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/v3.0.0") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+			releasePages: [releasePage(releaseRecord("v3.0.0"))],
+		});
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
+	});
+
+	test.each(["bump-patch", "fail"])("enabled applies %s when the candidate tag targets another commit", async onVersionConflict => {
+		mockPreflightInputs({ "on-version-conflict": onVersionConflict });
+		mockOctokit({
+			pages: [tagPage("v3.0.0", "v3.0.1")],
+			getRef: async ref => {
+				if (ref === "heads/v3") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				if (ref === "tags/v3.0.0" || ref === "tags/v3.0.1") {
+					return { object: { type: "commit", sha: "b".repeat(40) } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+		});
+
+		await run();
+
+		if (onVersionConflict === "bump-patch") {
+			expect(core.setFailed).not.toHaveBeenCalled();
+			expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
+		} else {
+			expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("Tag 'v3.0.0' already exists"));
+			expect(core.setOutput).not.toHaveBeenCalled();
+		}
 	});
 
 	test("enabled validates and emits tags for a prerelease without consulting stable tags", async () => {
@@ -257,7 +344,8 @@ describe("release preflight", () => {
 
 		await run();
 
-		expect(octokit.paginate.iterator).not.toHaveBeenCalled();
+		expect(octokit.tagIterator).not.toHaveBeenCalled();
+		expect(octokit.releaseIterator).toHaveBeenCalledOnce();
 		expect(listTagNames).not.toHaveBeenCalled();
 		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0-rc.0");
 		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.0-rc.0");

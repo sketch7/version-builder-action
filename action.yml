@@ -75,12 +75,14 @@ inputs:
   release-preflight:
     required: false
     description: "When true, use live GitHub release state to validate the resolved version
-      before it is emitted. Requires github-token."
+      before it is emitted. Requires github-token with contents: write so draft releases are
+      visible. The action never mutates GitHub releases."
     default: "false"
   github-token:
     required: false
     description: "GitHub token used only when release-preflight is true. The workflow needs
-      contents: read permission."
+      contents: write permission so paginated release listings include drafts. The action only
+      reads GitHub state and never mutates releases."
 
 # Define your outputs here.
 outputs:
@@ -107,10 +109,12 @@ outputs:
     description: "Returns whether the version is a prerelease version e.g. 'true' or
       'false'."
   isLatest:
-    description: "Returns whether a stable version belongs to the highest major parsed from local
-      tags matching tag-tmpl e.g. 'true' or 'false'. Always 'false' for prereleases."
+    description: "Returns whether a stable version belongs to the highest major parsed from tags
+      matching tag-tmpl e.g. 'true' or 'false'. Default mode uses local tags; release-preflight
+      uses live GitHub tags. Always 'false' for prereleases."
   tag:
-    description: "Returns the dist-tag for the build e.g. formatted preid, 'latest', or 'v1-lts'."
+    description: "Returns the dist-tag for the build e.g. formatted preid, 'latest', or 'v1-lts'.
+      Stable-major selection uses local tags by default and live GitHub tags with release-preflight."
   exactTag:
     description: "Validated exact Git tag for the resolved version when release-preflight is enabled."
   floatingTag:

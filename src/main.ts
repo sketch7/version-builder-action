@@ -4,8 +4,8 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { readFile } from "fs/promises";
 
-import { loadLiveTags, loadResolvedReleaseState, validateResolvedRelease } from "./release-preflight";
-import type { ReleasePreflightClient, ReleaseValidation } from "./release-preflight";
+import { isMatchingReleaseRecovery, loadLiveTags, loadResolvedReleaseState, validateResolvedRelease } from "./release-preflight";
+import type { ReleasePreflightClient, ReleaseState, ReleaseValidation } from "./release-preflight";
 import {
 	coerceArray,
 	formatPreid,
@@ -62,7 +62,7 @@ function getPreflightContext(token: string): PreflightContext {
 		getRef: async gitRef => (await octokit.rest.git.getRef({ ...repo, ref: gitRef })).data,
 		listTagPages: () => octokit.paginate.iterator(octokit.rest.git.listMatchingRefs, { ...repo, ref: "tags/" }),
 		getGitObject: async tagSha => (await octokit.rest.git.getTag({ ...repo, tag_sha: tagSha })).data,
-		getReleaseByTag: async tag => (await octokit.rest.repos.getReleaseByTag({ ...repo, tag })).data,
+		listReleasePages: () => octokit.paginate.iterator(octokit.rest.repos.listReleases, { ...repo }),
 	};
 
 	return { branch, expectedSha: sha, client };
@@ -140,8 +140,15 @@ export async function run(): Promise<void> {
 	const branchSlug = getBranchSlug(preidTemplate, branch);
 	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
 	let existingTags: string[];
+	let candidateState: ReleaseState | null = null;
+	let recoverCandidate = false;
 	try {
 		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
+		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
+			const { exactTag } = formatReleaseTags(baseVersion, tagTmpl);
+			candidateState = await loadResolvedReleaseState({ branch, exactTag }, preflight.client);
+			recoverCandidate = isMatchingReleaseRecovery({ expectedSha: preflight.expectedSha, version: baseVersion, tagTmpl }, candidateState);
+		}
 	} catch (error) {
 		core.setFailed(getErrorMessage(error));
 		return;
@@ -167,8 +174,8 @@ export async function run(): Promise<void> {
 				minor: Number(minor),
 				patch: Number(patch),
 				tagTmpl,
-				mode: onVersionConflict,
-				existingTags: onVersionConflict === "ignore" ? [] : existingTags,
+				mode: recoverCandidate ? "ignore" : onVersionConflict,
+				existingTags: recoverCandidate || onVersionConflict === "ignore" ? [] : existingTags,
 			});
 			const { baseVersion: bumpedVersion, bumped } = result;
 			if (bumped) {
@@ -192,7 +199,8 @@ export async function run(): Promise<void> {
 	if (preflight !== null) {
 		try {
 			const { exactTag } = formatReleaseTags(buildVersion, tagTmpl);
-			const releaseState = await loadResolvedReleaseState({ branch, exactTag }, preflight.client);
+			const releaseState =
+				candidateState?.exactTag === exactTag ? candidateState : await loadResolvedReleaseState({ branch, exactTag }, preflight.client);
 			releaseValidation = validateResolvedRelease({ expectedSha: preflight.expectedSha, version: buildVersion, tagTmpl }, releaseState);
 		} catch (error) {
 			core.setFailed(getErrorMessage(error));

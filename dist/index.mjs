@@ -20210,6 +20210,21 @@ function readTagName(value) {
 	if (typeof value.ref === "string" && value.ref.startsWith(TAG_REF_PREFIX) && value.ref.length > 10) return value.ref.slice(10);
 	throw new Error("Malformed tag entry from GitHub");
 }
+function readReleasePage(value) {
+	if (Array.isArray(value)) return value;
+	if (isRecord(value) && Array.isArray(value.data)) return value.data;
+	throw new Error("Malformed release page from GitHub");
+}
+function readRelease(value) {
+	if (!isRecord(value) || typeof value.tag_name !== "string" || value.tag_name.length === 0 || typeof value.draft !== "boolean" || typeof value.prerelease !== "boolean") throw new Error("Malformed release entry from GitHub");
+	return {
+		tagName: value.tag_name,
+		release: {
+			draft: value.draft,
+			prerelease: value.prerelease
+		}
+	};
+}
 /** Loads the authoritative complete tag set before resolving a release version. */
 async function loadLiveTags(client) {
 	const tags = [];
@@ -20234,17 +20249,14 @@ async function resolveTagCommit(client, exactTag) {
 	return object.sha;
 }
 async function loadExistingRelease(client, exactTag) {
-	try {
-		const response = await client.getReleaseByTag(exactTag);
-		if (!isRecord(response) || typeof response.draft !== "boolean" || typeof response.prerelease !== "boolean") throw new Error("Malformed release response from GitHub");
-		return {
-			draft: response.draft,
-			prerelease: response.prerelease
-		};
-	} catch (error) {
-		if (isNotFound(error)) return null;
-		throw error;
+	let matchingRelease = null;
+	for await (const page of client.listReleasePages()) for (const value of readReleasePage(page)) {
+		const { tagName, release } = readRelease(value);
+		if (tagName !== exactTag) continue;
+		if (matchingRelease !== null) throw new Error(`Ambiguous releases for '${exactTag}'`);
+		matchingRelease = release;
 	}
+	return matchingRelease;
 }
 /** Inspects only the state that can be evaluated after the exact version is resolved. */
 async function loadResolvedReleaseState(input, client) {
@@ -20258,6 +20270,22 @@ async function loadResolvedReleaseState(input, client) {
 		exactTagCommit,
 		existingRelease
 	};
+}
+/** Returns whether the inspected exact tag and published release can be recovered in place. */
+function isMatchingReleaseRecovery(input, state) {
+	const canonicalVersion = parseCanonicalVersion(input.version);
+	const { exactTag } = formatReleaseTags(canonicalVersion.version, input.tagTmpl);
+	const expectedSha = readSha(input.expectedSha, "expected commit");
+	if (state.branchSha !== expectedSha) throw new Error(`Release SHA '${expectedSha}' is not the current branch head`);
+	if (state.exactTag !== exactTag) throw new Error(`Resolved exact tag '${exactTag}' does not match the inspected exact tag '${state.exactTag}'`);
+	if (state.exactTagCommit === null) {
+		if (state.existingRelease !== null) throw new Error(`existing release for '${exactTag}' has no matching exact tag`);
+		return false;
+	}
+	if (state.exactTagCommit !== expectedSha) return false;
+	if (state.existingRelease === null) return false;
+	if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) throw new Error(`existing release for '${exactTag}' is not a matching published release`);
+	return true;
 }
 function validateResolvedRelease(input, state) {
 	const canonicalVersion = parseCanonicalVersion(input.version);
@@ -20310,10 +20338,7 @@ function getPreflightContext(token) {
 				...repo,
 				tag_sha: tagSha
 			})).data,
-			getReleaseByTag: async (tag) => (await octokit.rest.repos.getReleaseByTag({
-				...repo,
-				tag
-			})).data
+			listReleasePages: () => octokit.paginate.iterator(octokit.rest.repos.listReleases, { ...repo })
 		}
 	};
 }
@@ -20383,8 +20408,22 @@ async function run() {
 	const branchSlug = getBranchSlug(preidTemplate, branch);
 	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
 	let existingTags;
+	let candidateState = null;
+	let recoverCandidate = false;
 	try {
 		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
+		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
+			const { exactTag } = formatReleaseTags(baseVersion, tagTmpl);
+			candidateState = await loadResolvedReleaseState({
+				branch,
+				exactTag
+			}, preflight.client);
+			recoverCandidate = isMatchingReleaseRecovery({
+				expectedSha: preflight.expectedSha,
+				version: baseVersion,
+				tagTmpl
+			}, candidateState);
+		}
 	} catch (error) {
 		setFailed(getErrorMessage(error));
 		return;
@@ -20403,8 +20442,8 @@ async function run() {
 			minor: Number(minor),
 			patch: Number(patch),
 			tagTmpl,
-			mode: onVersionConflict,
-			existingTags: onVersionConflict === "ignore" ? [] : existingTags
+			mode: recoverCandidate ? "ignore" : onVersionConflict,
+			existingTags: recoverCandidate || onVersionConflict === "ignore" ? [] : existingTags
 		});
 		const { baseVersion: bumpedVersion, bumped } = result;
 		if (bumped) {
@@ -20428,7 +20467,7 @@ async function run() {
 	let releaseValidation = null;
 	if (preflight !== null) try {
 		const { exactTag } = formatReleaseTags(buildVersion, tagTmpl);
-		const releaseState = await loadResolvedReleaseState({
+		const releaseState = candidateState?.exactTag === exactTag ? candidateState : await loadResolvedReleaseState({
 			branch,
 			exactTag
 		}, preflight.client);
