@@ -44,6 +44,11 @@ both semver and non-semver variants as outputs.
   `fail` stops the action if the tag already exists, `bump-patch`
   auto-increments the patch until a free tag is found. Git tags are the
   source of truth — nothing is committed back to `package.json`.
+- Generated exact and floating refs are validated with the same Git ref
+  restrictions used by release finalization, including rejecting refs that
+  begin with `-`. SemVer numeric components remain decimal text during
+  conflict, latest-major, and dist-tag decisions, so adjacent values larger
+  than `Number.MAX_SAFE_INTEGER` remain distinct.
 - `release-preflight` is opt-in. When enabled, it uses GitHub's live,
   paginated tag, branch, exact-tag, and release state before emitting a
   publishable plan. Its token requires `contents: write` so GitHub includes

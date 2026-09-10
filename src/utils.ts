@@ -71,6 +71,50 @@ export interface ReleaseTags {
 	floatingTag: string;
 }
 
+export type DecimalComponent = string | number;
+
+function toDecimalString(value: DecimalComponent, label = "decimal component"): string {
+	if (typeof value === "number") {
+		if (!Number.isSafeInteger(value) || value < 0) {
+			throw new Error(`${label} must be a non-negative safe integer or decimal string`);
+		}
+		return String(value);
+	}
+	if (!/^(?:0|[1-9]\d*)$/.test(value)) {
+		throw new Error(`${label} must be a canonical non-negative decimal string`);
+	}
+	return value;
+}
+
+function toCompatibleDecimal(value: string): string | number {
+	const numericValue = Number(value);
+	return Number.isSafeInteger(numericValue) && String(numericValue) === value ? numericValue : value;
+}
+
+/** Compares two canonical non-negative decimal strings without numeric coercion. */
+export function compareDecimalStrings(left: string, right: string): number {
+	const normalizedLeft = toDecimalString(left);
+	const normalizedRight = toDecimalString(right);
+	if (normalizedLeft.length !== normalizedRight.length) {
+		return normalizedLeft.length - normalizedRight.length;
+	}
+	return normalizedLeft === normalizedRight ? 0 : normalizedLeft < normalizedRight ? -1 : 1;
+}
+
+function incrementDecimal(value: string): string {
+	const digits = value.split("");
+	let index = digits.length - 1;
+	while (index >= 0 && digits[index] === "9") {
+		digits[index] = "0";
+		index--;
+	}
+	if (index < 0) {
+		return `1${digits.join("")}`;
+	}
+	digits[index] = String.fromCharCode(digits[index].charCodeAt(0) + 1);
+	return digits.join("");
+}
+
 export function parseCanonicalVersion(version: string): CanonicalVersion {
 	const prereleaseStart = version.indexOf("-");
 	const coreEnd = prereleaseStart === -1 ? version.length : prereleaseStart;
@@ -105,6 +149,7 @@ export function validateGitTag(tag: string): void {
 	});
 	const invalid =
 		tag.length === 0 ||
+		tag.startsWith("-") ||
 		tag.startsWith("/") ||
 		tag.endsWith("/") ||
 		tag.includes("//") ||
@@ -269,7 +314,7 @@ export function parseBranchVersion(branch: string): number[] | null {
  * Parses the major version from an exact stable tag matching a major tag template.
  * Stable tags must contain a complete `major.minor.patch` version with no suffix.
  */
-export function parseStableTagMajor(tag: string, tagTmpl: string): number | null {
+export function parseStableTagMajor(tag: string, tagTmpl: string): DecimalComponent | null {
 	const marker = "{major}";
 	const markerIndex = tagTmpl.indexOf(marker);
 	if (markerIndex === -1) {
@@ -281,17 +326,18 @@ export function parseStableTagMajor(tag: string, tagTmpl: string): number | null
 	const suffix = escapeRegex(tagTmpl.slice(markerIndex + marker.length));
 	const numericIdentifier = "(?:0|[1-9]\\d*)";
 	const match = new RegExp(`^${prefix}(${numericIdentifier})\\.${numericIdentifier}\\.${numericIdentifier}${suffix}$`).exec(tag);
-	return match ? Number(match[1]) : null;
+	return match ? toCompatibleDecimal(match[1]) : null;
 }
 
 /**
  * Returns true when the current major is at least as high as every stable major in `tags`.
  * Prerelease and malformed tags are ignored.
  */
-export function isLatestStableMajor(currentMajor: number, tags: string[], tagTmpl: string): boolean {
+export function isLatestStableMajor(currentMajor: DecimalComponent, tags: string[], tagTmpl: string): boolean {
+	const currentMajorText = toDecimalString(currentMajor, "major version");
 	return tags.every(tag => {
 		const major = parseStableTagMajor(tag, tagTmpl);
-		return major === null || major <= currentMajor;
+		return major === null || compareDecimalStrings(toDecimalString(major, "tag major"), currentMajorText) <= 0;
 	});
 }
 
@@ -300,11 +346,11 @@ export function isLatestStableMajor(currentMajor: number, tags: string[], tagTmp
  * Pre-release builds use their resolved preid; stable builds use `latest` for the highest
  * stable major and a version-specific LTS tag otherwise.
  */
-export function resolveTag(input: { resolvedPreid: string | null; currentMajor: number; isLatest: boolean }): string {
+export function resolveTag(input: { resolvedPreid: string | null; currentMajor: DecimalComponent; isLatest: boolean }): string {
 	if (input.resolvedPreid !== null) {
 		return input.resolvedPreid;
 	}
-	return input.isLatest ? "latest" : `v${input.currentMajor}-lts`;
+	return input.isLatest ? "latest" : `v${toDecimalString(input.currentMajor, "major version")}-lts`;
 }
 
 /**
@@ -381,11 +427,11 @@ export type VersionConflictMode = "ignore" | "fail" | "bump-patch";
 
 export interface VersionConflictResult {
 	baseVersion: string;
-	patch: number;
+	patch: string | number;
 	bumped: boolean;
 }
 
-function formatStableTag(tagTmpl: string, version: { major: number; minor: number; patch: number }): string {
+function formatStableTag(tagTmpl: string, version: { major: string; minor: string; patch: string }): string {
 	const marker = "{major}";
 	const markerIndex = tagTmpl.indexOf(marker);
 	const versionText = `${version.major}.${version.minor}.${version.patch}`;
@@ -402,24 +448,30 @@ function formatStableTag(tagTmpl: string, version: { major: number; minor: numbe
  * `mode: "fail"` throws when the exact tag already exists.
  */
 export function resolveVersionConflict(input: {
-	major: number;
-	minor: number;
-	patch: number;
+	major: DecimalComponent;
+	minor: DecimalComponent;
+	patch: DecimalComponent;
 	tagTmpl: string;
 	mode: VersionConflictMode;
 	existingTags: string[];
 }): VersionConflictResult {
-	const { major, minor, tagTmpl, mode, existingTags } = input;
-	let { patch } = input;
+	const major = toDecimalString(input.major, "major version");
+	const minor = toDecimalString(input.minor, "minor version");
+	let patch = toDecimalString(input.patch, "patch version");
+	const patchOutput = (value: string): string | number => {
+		const numericValue = Number(value);
+		return typeof input.patch === "number" && Number.isSafeInteger(numericValue) && String(numericValue) === value ? numericValue : value;
+	};
+	const { tagTmpl, mode, existingTags } = input;
 
 	if (mode === "ignore") {
-		return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: false };
+		return { baseVersion: `${major}.${minor}.${patch}`, patch: patchOutput(patch), bumped: false };
 	}
 
 	const tagSet = new Set(existingTags);
 	const exactTag = formatStableTag(tagTmpl, { major, minor, patch });
 	if (!tagSet.has(exactTag)) {
-		return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: false };
+		return { baseVersion: `${major}.${minor}.${patch}`, patch: patchOutput(patch), bumped: false };
 	}
 
 	if (mode === "fail") {
@@ -427,7 +479,7 @@ export function resolveVersionConflict(input: {
 	}
 
 	do {
-		patch++;
+		patch = incrementDecimal(patch);
 	} while (tagSet.has(formatStableTag(tagTmpl, { major, minor, patch })));
-	return { baseVersion: `${major}.${minor}.${patch}`, patch, bumped: true };
+	return { baseVersion: `${major}.${minor}.${patch}`, patch: patchOutput(patch), bumped: true };
 }

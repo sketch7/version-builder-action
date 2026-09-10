@@ -132,7 +132,7 @@ export async function run(): Promise<void> {
 
 	let versionSuffix: string | undefined;
 	const versionSegments = baseVersion.split(".");
-	const [major, minor, initialPatch] = versionSegments;
+	const [major = "", minor = "", initialPatch = ""] = versionSegments;
 	let patch = initialPatch;
 
 	const resolvedPreid = resolvePreid({ branch, preidBranches, stableBranches, defaultPreid, forcePreid, forceStable });
@@ -170,9 +170,9 @@ export async function run(): Promise<void> {
 	} else if (versionSegments.length === 3) {
 		try {
 			const result = resolveVersionConflict({
-				major: Number(major),
-				minor: Number(minor),
-				patch: Number(patch),
+				major,
+				minor,
+				patch,
 				tagTmpl,
 				mode: recoverCandidate ? "ignore" : onVersionConflict,
 				existingTags: recoverCandidate || onVersionConflict === "ignore" ? [] : existingTags,
@@ -193,8 +193,8 @@ export async function run(): Promise<void> {
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
 	const preidOutput = formattedPreid ?? "";
 
-	const isLatest = isPreRel ? false : isLatestStableMajor(Number(major), existingTags, tagTmpl);
-	const tag = resolveTag({ resolvedPreid: formattedPreid, currentMajor: Number(major), isLatest });
+	const isLatest = isPreRel ? false : isLatestStableMajor(major, existingTags, tagTmpl);
+	const tag = resolveTag({ resolvedPreid: formattedPreid, currentMajor: major, isLatest });
 	let releaseValidation: ReleaseValidation | null = null;
 	if (preflight !== null) {
 		try {

@@ -88,6 +88,10 @@ describe("formatReleaseTags", () => {
 			expect(() => formatReleaseTags("1.3.0", tagTmpl)).toThrow("Invalid Git tag");
 		},
 	);
+
+	test("rejects generated refs beginning with a dash like release finalization", () => {
+		expect(() => formatReleaseTags("1.3.0", "-v{major}")).toThrow("Invalid Git tag");
+	});
 });
 
 describe("validateGitTag", () => {
@@ -627,6 +631,23 @@ describe("resolveVersionConflict", () => {
 			}),
 		).toEqual({ baseVersion: "1.0.2", patch: 2, bumped: true });
 	});
+
+	test("compares adjacent huge components exactly during conflict resolution", () => {
+		const major = "9007199254740993";
+		const minor = "9007199254740993";
+		const patch = "9007199254740993";
+
+		expect(
+			resolveVersionConflict({
+				major,
+				minor,
+				patch,
+				tagTmpl: "v{major}",
+				mode: "bump-patch",
+				existingTags: [`v${major}.${minor}.${patch}`],
+			}),
+		).toEqual({ baseVersion: `${major}.${minor}.9007199254740994`, patch: "9007199254740994", bumped: true });
+	});
 });
 
 describe("parseStableTagMajor", () => {
@@ -643,6 +664,10 @@ describe("parseStableTagMajor", () => {
 	])("parses stable tag %s", (tag, template, expected) => {
 		expect(parseStableTagMajor(tag, template)).toBe(expected);
 	});
+
+	test("preserves adjacent huge major values as decimal strings", () => {
+		expect(parseStableTagMajor("v9007199254740993.0.0", "v{major}")).toBe("9007199254740993");
+	});
 });
 
 describe("isLatestStableMajor", () => {
@@ -658,6 +683,10 @@ describe("isLatestStableMajor", () => {
 		const tags = Array.from({ length: 101 }, (_, index) => `v${index + 1}.0.0`);
 		expect(isLatestStableMajor(101, tags, "v{major}")).toBe(true);
 		expect(isLatestStableMajor(100, tags, "v{major}")).toBe(false);
+	});
+
+	test("does not equate adjacent huge stable majors", () => {
+		expect(isLatestStableMajor("9007199254740992", ["v9007199254740993.0.0"], "v{major}")).toBe(false);
 	});
 });
 
@@ -680,5 +709,9 @@ describe("resolveTag", () => {
 		},
 	])("given $name - should be $expected", ({ input, expected }) => {
 		expect(resolveTag(input)).toBe(expected);
+	});
+
+	test("keeps an adjacent huge major in the LTS dist-tag", () => {
+		expect(resolveTag({ resolvedPreid: null, currentMajor: "9007199254740993", isLatest: false })).toBe("v9007199254740993-lts");
 	});
 });

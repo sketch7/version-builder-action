@@ -64,7 +64,8 @@ inputs:
   tag-tmpl:
     required: false
     description: "Tag template used to parse local stable tags for latest-major selection and to
-      check version conflicts. Use `{major}` as placeholder e.g. 'v{major}' matches tag 'v1.5.6'."
+      check version conflicts. Use `{major}` as placeholder e.g. 'v{major}' matches tag 'v1.5.6'.
+      Generated exact and floating refs use release-finalizer-compatible Git tag validation."
     default: "v{major}"
   on-version-conflict:
     required: false

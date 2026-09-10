@@ -209,6 +209,23 @@ async function* failingTagPages(error: Error): AsyncGenerator<unknown> {
 }
 
 describe("release preflight", () => {
+	test("enabled rejects a tag template whose generated refs begin with a dash", async () => {
+		mockPreflightInputs({ "tag-tmpl": "-v{major}" });
+		mockOctokit({
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/-v3.0.0") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+		});
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("Invalid Git tag"));
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
 	test("disabled preserves local versioning without reading a token or calling GitHub", async () => {
 		mockPreflightInputs({ "release-preflight": "false", "github-token": "must-not-be-read" });
 		vi.mocked(core.getBooleanInput).mockReturnValue(false);
@@ -461,6 +478,34 @@ test("stable versions in an older major use the LTS tag and report isLatest fals
 
 	expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
 	expect(core.setOutput).toHaveBeenCalledWith("tag", "v3-lts");
+});
+
+test("stable action decisions preserve adjacent huge major, minor, and patch components", async () => {
+	const major = "9007199254740993";
+	const minor = "9007199254740993";
+	const patch = "9007199254740993";
+	vi.mocked(github).context = { ref: `refs/heads/v${major}` } as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: `${major}.${minor}.${patch}`,
+			preid: "dev",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+			"on-version-conflict": "fail",
+			"tag-tmpl": "v{major}",
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	vi.mocked(listTagNames).mockReturnValue([`v${major}.${minor}.${BigInt(patch) - 1n}`, `v${BigInt(major) + 1n}.0.0`]);
+
+	await run();
+
+	expect(core.setFailed).not.toHaveBeenCalled();
+	expect(core.setOutput).toHaveBeenCalledWith("version", `${major}.${minor}.${patch}`);
+	expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
+	expect(core.setOutput).toHaveBeenCalledWith("tag", `v${major}-lts`);
 });
 
 describe("prerelease suffix validation", () => {
