@@ -20308,21 +20308,37 @@ async function loadResolvedReleaseState(input, client) {
 		existingRelease
 	};
 }
-/** Returns whether the inspected exact tag and published release can be recovered in place. */
-function isMatchingReleaseRecovery(input, state) {
-	const canonicalVersion = parseCanonicalVersion(input.version);
-	const { exactTag } = formatReleaseTags(canonicalVersion.version, input.tagTmpl);
-	const expectedSha = readSha(input.expectedSha, "expected commit");
-	if (state.branchSha !== expectedSha) throw new Error(`Release SHA '${expectedSha}' is not the current branch head`);
-	if (state.exactTag !== exactTag) throw new Error(`Resolved exact tag '${exactTag}' does not match the inspected exact tag '${state.exactTag}'`);
-	if (state.exactTagCommit === null) {
-		if (state.existingRelease !== null) throw new Error(`existing release for '${exactTag}' has no matching exact tag`);
-		return false;
+/** Finds an already allocated stable version for this commit before allocating another patch. */
+async function findReleaseAtCommit(input, tags, client) {
+	const base = parseCanonicalVersion(input.version);
+	formatReleaseTags(input.version, input.tagTmpl);
+	const [prefix, suffix] = input.tagTmpl.split("{major}");
+	const versions = tags.flatMap((tag) => {
+		if (!tag.startsWith(prefix) || !tag.endsWith(suffix)) return [];
+		try {
+			const candidate = parseCanonicalVersion(tag.slice(prefix.length, suffix ? -suffix.length : void 0));
+			return !candidate.isPrerelease && candidate.major === base.major && candidate.minor === base.minor && compareDecimalStrings(candidate.patch, base.patch) >= 0 ? [candidate] : [];
+		} catch {
+			return [];
+		}
+	}).sort((left, right) => compareDecimalStrings(right.patch, left.patch));
+	for (const candidate of versions) {
+		const { exactTag } = formatReleaseTags(candidate.version, input.tagTmpl);
+		if (await resolveTagCommit(client, exactTag) !== input.expectedSha) continue;
+		const state = await loadResolvedReleaseState({
+			branch: input.branch,
+			exactTag
+		}, client);
+		validateResolvedRelease({
+			...input,
+			version: candidate.version
+		}, state);
+		return {
+			version: candidate.version,
+			state
+		};
 	}
-	if (state.exactTagCommit !== expectedSha) return false;
-	if (state.existingRelease === null) return false;
-	if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) throw new Error(`existing release for '${exactTag}' is not a matching published release`);
-	return true;
+	return null;
 }
 function validateResolvedRelease(input, state) {
 	const canonicalVersion = parseCanonicalVersion(input.version);
@@ -20334,6 +20350,7 @@ function validateResolvedRelease(input, state) {
 	if (state.existingRelease !== null) {
 		if (state.exactTagCommit === null) throw new Error(`existing release for '${exactTag}' has no matching exact tag`);
 		if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) throw new Error(`existing release for '${exactTag}' is not a matching published release`);
+		throw new Error(`Version '${input.version}' is already released from this commit`);
 	}
 	return {
 		exactTag,
@@ -20450,16 +20467,19 @@ async function run() {
 	try {
 		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
 		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
-			const { exactTag } = formatReleaseTags(baseVersion, tagTmpl);
-			candidateState = await loadResolvedReleaseState({
+			const recovery = await findReleaseAtCommit({
 				branch,
-				exactTag
-			}, preflight.client);
-			recoverCandidate = isMatchingReleaseRecovery({
 				expectedSha: preflight.expectedSha,
 				version: baseVersion,
 				tagTmpl
-			}, candidateState);
+			}, existingTags, preflight.client);
+			if (recovery !== null) {
+				candidateState = recovery.state;
+				baseVersion = recovery.version;
+				fileVersion = recovery.version;
+				[, , patch] = recovery.version.split(".");
+				recoverCandidate = true;
+			}
 		}
 	} catch (error) {
 		setFailed(getErrorMessage(error));

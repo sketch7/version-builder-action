@@ -189,9 +189,18 @@ function mockOctokit(
 		rest: {
 			git: {
 				listMatchingRefs,
-				getRef: vi.fn(async ({ ref }: { ref: string }) => ({
-					data: await (overrides.getRef?.(ref) ?? Promise.resolve({ object: { type: "commit", sha: overrides.branchSha ?? EXPECTED_SHA } })),
-				})),
+				getRef: vi.fn(async ({ ref }: { ref: string }) => {
+					if (overrides.getRef) {
+						return { data: await overrides.getRef(ref) };
+					}
+					if (ref.startsWith("heads/")) {
+						return { data: { object: { type: "commit", sha: overrides.branchSha ?? EXPECTED_SHA } } };
+					}
+					if (["tags/v3.0.0", "tags/v3.0.1", "tags/v4.0.0"].includes(ref)) {
+						return { data: { object: { type: "commit", sha: "b".repeat(40) } } };
+					}
+					throw apiError(`Reference ${ref} not found`, 404);
+				}),
 				getTag: vi.fn(),
 			},
 			repos: {
@@ -293,7 +302,7 @@ describe("release preflight", () => {
 				}
 				throw apiError(`Reference ${ref} not found`, 404);
 			},
-			releasePages: [releasePage(releaseRecord("v3.0.0"))],
+			releasePages: [],
 		});
 
 		await run();
@@ -306,7 +315,7 @@ describe("release preflight", () => {
 		expect(octokit.tagIterator).toHaveBeenCalledOnce();
 	});
 
-	test("enabled preserves a matching exact tag with the ignore conflict policy", async () => {
+	test("enabled rejects a completed exact release even with the ignore conflict policy", async () => {
 		mockPreflightInputs({ "on-version-conflict": "ignore" });
 		mockOctokit({
 			getRef: async ref => {
@@ -320,8 +329,33 @@ describe("release preflight", () => {
 
 		await run();
 
-		expect(core.setFailed).not.toHaveBeenCalled();
-		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("already released"));
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test.each([false, true])("retries an allocated hotfix without creating another version (completed=%s)", async completed => {
+		mockPreflightInputs();
+		mockOctokit({
+			pages: [tagPage("v3.0.0", "v3.0.1")],
+			releasePages: completed ? [releasePage(releaseRecord("v3.0.1"))] : [],
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/v3.0.1") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				if (ref === "tags/v3.0.0") {
+					return { object: { type: "commit", sha: "b".repeat(40) } };
+				}
+				throw apiError("missing", 404);
+			},
+		});
+		await run();
+		if (completed) {
+			expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("already released"));
+			expect(core.setOutput).not.toHaveBeenCalled();
+		} else {
+			expect(core.setFailed).not.toHaveBeenCalled();
+			expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.1");
+		}
 	});
 
 	test.each(["bump-patch", "fail"])("enabled applies %s when the candidate tag targets another commit", async onVersionConflict => {

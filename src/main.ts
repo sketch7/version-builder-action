@@ -4,7 +4,7 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { readFile } from "fs/promises";
 
-import { isMatchingReleaseRecovery, loadLiveTags, loadResolvedReleaseState, validateResolvedRelease } from "./release-preflight";
+import { findReleaseAtCommit, loadLiveTags, loadResolvedReleaseState, validateResolvedRelease } from "./release-preflight";
 import type { ReleasePreflightClient, ReleaseState, ReleaseValidation } from "./release-preflight";
 import {
 	coerceArray,
@@ -145,9 +145,18 @@ export async function run(): Promise<void> {
 	try {
 		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
 		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
-			const { exactTag } = formatReleaseTags(baseVersion, tagTmpl);
-			candidateState = await loadResolvedReleaseState({ branch, exactTag }, preflight.client);
-			recoverCandidate = isMatchingReleaseRecovery({ expectedSha: preflight.expectedSha, version: baseVersion, tagTmpl }, candidateState);
+			const recovery = await findReleaseAtCommit(
+				{ branch, expectedSha: preflight.expectedSha, version: baseVersion, tagTmpl },
+				existingTags,
+				preflight.client,
+			);
+			if (recovery !== null) {
+				candidateState = recovery.state;
+				baseVersion = recovery.version;
+				fileVersion = recovery.version;
+				[, , patch] = recovery.version.split(".");
+				recoverCandidate = true;
+			}
 		}
 	} catch (error) {
 		core.setFailed(getErrorMessage(error));

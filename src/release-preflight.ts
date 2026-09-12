@@ -1,4 +1,4 @@
-import { formatReleaseTags, parseCanonicalVersion, validateGitTag } from "./utils";
+import { compareDecimalStrings, formatReleaseTags, parseCanonicalVersion, validateGitTag } from "./utils";
 
 const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
 const TAG_REF_PREFIX = "refs/tags/";
@@ -197,34 +197,45 @@ export async function loadResolvedReleaseState(input: LoadResolvedReleaseStateIn
 	return { exactTag: input.exactTag, branchSha: branchReference.sha, exactTagCommit, existingRelease };
 }
 
-/** Returns whether the inspected exact tag and published release can be recovered in place. */
-export function isMatchingReleaseRecovery(input: ValidateResolvedReleaseInput, state: ReleaseState): boolean {
-	const canonicalVersion = parseCanonicalVersion(input.version);
-	const { exactTag } = formatReleaseTags(canonicalVersion.version, input.tagTmpl);
-	const expectedSha = readSha(input.expectedSha, "expected commit");
-
-	if (state.branchSha !== expectedSha) {
-		throw new Error(`Release SHA '${expectedSha}' is not the current branch head`);
-	}
-	if (state.exactTag !== exactTag) {
-		throw new Error(`Resolved exact tag '${exactTag}' does not match the inspected exact tag '${state.exactTag}'`);
-	}
-	if (state.exactTagCommit === null) {
-		if (state.existingRelease !== null) {
-			throw new Error(`existing release for '${exactTag}' has no matching exact tag`);
+/** Finds an already allocated stable version for this commit before allocating another patch. */
+export async function findReleaseAtCommit(
+	input: ValidateResolvedReleaseInput & { branch: string },
+	tags: string[],
+	client: ReleasePreflightClient,
+): Promise<{ version: string; state: ReleaseState } | null> {
+	const base = parseCanonicalVersion(input.version);
+	formatReleaseTags(input.version, input.tagTmpl);
+	const [prefix, suffix] = input.tagTmpl.split("{major}");
+	const versions = tags
+		.flatMap(tag => {
+			if (!tag.startsWith(prefix) || !tag.endsWith(suffix)) {
+				return [];
+			}
+			try {
+				const candidate = parseCanonicalVersion(tag.slice(prefix.length, suffix ? -suffix.length : undefined));
+				return !candidate.isPrerelease &&
+					candidate.major === base.major &&
+					candidate.minor === base.minor &&
+					compareDecimalStrings(candidate.patch, base.patch) >= 0
+					? [candidate]
+					: [];
+			} catch {
+				return [];
+			}
+		})
+		.sort((left, right) => compareDecimalStrings(right.patch, left.patch));
+	for (const candidate of versions) {
+		const { exactTag } = formatReleaseTags(candidate.version, input.tagTmpl);
+		// oxlint-disable-next-line no-await-in-loop -- Stop at the matching allocation; API failures must propagate.
+		if ((await resolveTagCommit(client, exactTag)) !== input.expectedSha) {
+			continue;
 		}
-		return false;
+		// oxlint-disable-next-line no-await-in-loop -- Inspect release state only for a matching commit.
+		const state = await loadResolvedReleaseState({ branch: input.branch, exactTag }, client);
+		validateResolvedRelease({ ...input, version: candidate.version }, state);
+		return { version: candidate.version, state };
 	}
-	if (state.exactTagCommit !== expectedSha) {
-		return false;
-	}
-	if (state.existingRelease === null) {
-		return false;
-	}
-	if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) {
-		throw new Error(`existing release for '${exactTag}' is not a matching published release`);
-	}
-	return true;
+	return null;
 }
 
 export function validateResolvedRelease(input: ValidateResolvedReleaseInput, state: ReleaseState): ReleaseValidation {
@@ -248,6 +259,7 @@ export function validateResolvedRelease(input: ValidateResolvedReleaseInput, sta
 		if (state.existingRelease.draft || state.existingRelease.prerelease !== canonicalVersion.isPrerelease) {
 			throw new Error(`existing release for '${exactTag}' is not a matching published release`);
 		}
+		throw new Error(`Version '${input.version}' is already released from this commit`);
 	}
 
 	return { exactTag, floatingTag, exactTagExists: state.exactTagCommit !== null };

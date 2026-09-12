@@ -70,14 +70,15 @@ inputs:
   on-version-conflict:
     required: false
     description: "Behavior when a stable (non-preid) version's git tag already exists:
-      'ignore' (default, no check — fully backward compatible), 'fail', or 'bump-patch'
+      'ignore' (default, no local conflict check), 'fail', or 'bump-patch'
       (auto-increments the patch until a free tag is found)."
     default: "ignore"
   release-preflight:
     required: false
     description: "When true, use live GitHub release state to validate the resolved version
       before it is emitted. Requires github-token with contents: write so draft releases are
-      visible. The action never mutates GitHub releases."
+      visible. Completed releases fail before publication; unfinished same-commit tags can
+      be recovered. The action never mutates GitHub releases."
     default: "false"
   github-token:
     required: false

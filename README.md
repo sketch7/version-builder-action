@@ -272,10 +272,13 @@ steps:
     run: npm publish --tag "${{ steps.version.outputs.tag }}"
 ```
 
-An existing exact tag is accepted only when it matches the triggering commit;
-an existing published GitHub Release must also have matching prerelease state.
-This permits recovery by rerunning a partially completed release. A mismatched
-tag, draft release, or wrong release kind fails before package publication.
+An existing exact tag is accepted only when it matches the triggering commit
+and has no GitHub Release yet. Stable retries reuse that allocated version,
+including an automatically bumped hotfix, instead of allocating another patch.
+A completed release fails before publication, even for the same commit.
+A mismatched tag, draft release, or wrong release kind also fails.
+This is a breaking change: callers must finalize the version returned by
+preflight and must not rerun publication for a completed release.
 Preflight cannot remove races introduced by later mutations: immediately before
 creating/moving Git tags or marking a release latest, revalidate the branch
 head and relevant release/tag state. Do not recalculate the version during that

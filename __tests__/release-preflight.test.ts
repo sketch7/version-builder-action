@@ -286,14 +286,14 @@ describe("validateResolvedRelease", () => {
 		expect(() => validateResolvedRelease({ ...validationInput, version: "1.2.4" }, state)).toThrow("inspected exact tag");
 	});
 
-	test("accepts a loaded matching tag with a matching existing release", async () => {
+	test("rejects a loaded matching tag with a completed release", async () => {
 		const client = createClient({
 			getRef: async () => ({ object: { type: "commit", sha: EXPECTED_SHA } }),
 			listReleasePages: () => tagPages(releasePage(releaseRecord("v1.2.3"))),
 		});
 		const state = await loadResolvedReleaseState(loadInput, client);
 
-		expect(validateResolvedRelease(validationInput, state)).toEqual({ exactTag: "v1.2.3", floatingTag: "v1", exactTagExists: true });
+		expect(() => validateResolvedRelease(validationInput, state)).toThrow("already released");
 	});
 
 	test("derives matching exact and floating tags from the canonical version", () => {
@@ -302,7 +302,7 @@ describe("validateResolvedRelease", () => {
 				exactTag: "v1.2.3",
 				branchSha: EXPECTED_SHA,
 				exactTagCommit: EXPECTED_SHA,
-				existingRelease: { draft: false, prerelease: false },
+				existingRelease: null,
 			}),
 		).toEqual({ exactTag: "v1.2.3", floatingTag: "v1", exactTagExists: true });
 	});
@@ -354,7 +354,7 @@ describe("validateResolvedRelease", () => {
 		).toThrow("no matching exact tag");
 	});
 
-	test("derives prerelease tags and requires a prerelease release", () => {
+	test("derives prerelease tags for an unfinished release", () => {
 		expect(
 			validateResolvedRelease(
 				{ ...validationInput, version: "1.2.3-rc.4" },
@@ -362,7 +362,7 @@ describe("validateResolvedRelease", () => {
 					exactTag: "v1.2.3-rc.4",
 					branchSha: EXPECTED_SHA,
 					exactTagCommit: EXPECTED_SHA,
-					existingRelease: { draft: false, prerelease: true },
+					existingRelease: null,
 				},
 			),
 		).toEqual({ exactTag: "v1.2.3-rc.4", floatingTag: "v1", exactTagExists: true });
