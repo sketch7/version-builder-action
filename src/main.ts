@@ -90,6 +90,19 @@ function getPreidCounter(isPreRel: boolean, counterBaseRef: string, packageJsonP
 	return counterBaseRef ? getCommitCountSinceMergeBase(counterBaseRef) : getCommitCountSinceFileChange(packageJsonPath, undefined, '"version":');
 }
 
+function validateStableBranchMajor(branch: string, resolvedMajor: string): void {
+	const branchMajor = /^v(?<major>\d+)$/.exec(branch)?.groups?.major;
+	if (branchMajor === undefined) {
+		return;
+	}
+
+	const normalizedBranchMajor = branchMajor.replace(/^0+(?=\d)/, "");
+	const normalizedResolvedMajor = resolvedMajor.replace(/^0+(?=\d)/, "");
+	if (normalizedBranchMajor !== normalizedResolvedMajor) {
+		throw new Error(`Stable branch '${branch}' must match resolved version major '${resolvedMajor}'`);
+	}
+}
+
 // oxlint-disable-next-line complexity -- The public action contract resolves its inputs in one ordered workflow.
 export async function run(): Promise<void> {
 	const releasePreflight = core.getBooleanInput("release-preflight");
@@ -143,6 +156,9 @@ export async function run(): Promise<void> {
 	let candidateState: ReleaseState | null = null;
 	let recoverCandidate = false;
 	try {
+		if (preflight !== null && !isPreRel) {
+			validateStableBranchMajor(branch, major);
+		}
 		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
 		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
 			const recovery = await findReleaseAtCommit(

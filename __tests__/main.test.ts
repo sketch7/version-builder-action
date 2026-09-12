@@ -277,6 +277,42 @@ describe("release preflight", () => {
 		expect(core.setOutput).not.toHaveBeenCalled();
 	});
 
+	test("enabled rejects a stable version whose vN branch has another major", async () => {
+		mockPreflightInputs({ version: "2.0.0" });
+		const octokit = mockOctokit();
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("Stable branch 'v3' must match resolved version major '2'"));
+		expect(octokit.tagIterator).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("disabled calculation preserves a stable vN branch with another major", async () => {
+		mockPreflightInputs({ version: "2.0.0", "release-preflight": "false" });
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+		vi.mocked(listTagNames).mockReturnValue([]);
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "2.0.0");
+	});
+
+	test("preflight preserves a forced prerelease preview on a mismatched stable branch", async () => {
+		mockPreflightInputs({ version: "2.0.0", "force-preid": "true" });
+		vi.mocked(core.getBooleanInput).mockImplementation(name => name === "release-preflight" || name === "force-preid");
+		const octokit = mockOctokit();
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "2.0.0-dev.0");
+		expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", true);
+		expect(octokit.tagIterator).not.toHaveBeenCalled();
+	});
+
 	test("enabled resolves a stable bump from paginated live tags and emits validated release tags", async () => {
 		mockPreflightInputs();
 		const octokit = mockOctokit();

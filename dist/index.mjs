@@ -20410,6 +20410,11 @@ function getPreidCounter(isPreRel, counterBaseRef, packageJsonPath) {
 	if (!isPreRel) return 0;
 	return counterBaseRef ? getCommitCountSinceMergeBase(counterBaseRef) : getCommitCountSinceFileChange(packageJsonPath, void 0, "\"version\":");
 }
+function validateStableBranchMajor(branch, resolvedMajor) {
+	const branchMajor = /^v(?<major>\d+)$/.exec(branch)?.groups?.major;
+	if (branchMajor === void 0) return;
+	if (branchMajor.replace(/^0+(?=\d)/, "") !== resolvedMajor.replace(/^0+(?=\d)/, "")) throw new Error(`Stable branch '${branch}' must match resolved version major '${resolvedMajor}'`);
+}
 async function run() {
 	const releasePreflight = getBooleanInput("release-preflight");
 	let preflight = null;
@@ -20465,6 +20470,7 @@ async function run() {
 	let candidateState = null;
 	let recoverCandidate = false;
 	try {
+		if (preflight !== null && !isPreRel) validateStableBranchMajor(branch, major);
 		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
 		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
 			const recovery = await findReleaseAtCommit({
