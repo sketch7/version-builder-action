@@ -78,7 +78,10 @@ inputs:
     description: "When true, use live GitHub release state to validate the resolved version
       before it is emitted. Requires github-token with contents: write so draft releases are
       visible. Completed releases fail before publication; unfinished same-commit tags can
-      be recovered. The action never mutates GitHub releases."
+      be recovered. Default-branch pushes that only bump package.json to the next minor
+      (and matching npm lockfile root versions) return skip-publish without a version.
+      Requires full checkout history. Explicit version inputs bypass bump detection.
+      The action never mutates GitHub releases."
     default: "false"
   github-token:
     required: false
@@ -88,6 +91,9 @@ inputs:
 
 # Define your outputs here.
 outputs:
+  skip-publish:
+    description: "True for a version-only next-minor bump with release-preflight enabled.
+      No version outputs are emitted; callers must skip publication and release follow-ups."
   version:
     description: "Build version generated e.g. '1.5.6-dev.123'. Patch is bumped when
       on-version-conflict: bump-patch resolved a tag collision."

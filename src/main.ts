@@ -24,6 +24,7 @@ import {
 	validatePrereleaseSuffix,
 } from "./utils";
 import type { VersionConflictMode } from "./utils";
+import { isVersionOnlyBump } from "./version-only-bump";
 
 const BRANCH_REF_PREFIX = "refs/heads/";
 const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
@@ -120,6 +121,22 @@ export async function run(): Promise<void> {
 	let version = core.getInput("version");
 	const packageJsonDir = core.getInput("package-json-dir").replace(/^\/+|\/+$/g, "");
 	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
+	if (
+		releasePreflight &&
+		!version &&
+		isVersionOnlyBump({
+			eventName: github.context.eventName,
+			ref: github.context.ref,
+			defaultBranch: github.context.payload?.repository?.default_branch ?? "",
+			before: github.context.payload?.before ?? "",
+			sha: github.context.sha,
+			packageJsonPath,
+		})
+	) {
+		core.notice("Skipping publication: this push only advances the next minor version.");
+		core.setOutput("skip-publish", true);
+		return;
+	}
 	const defaultPreid = core.getInput("preid") || "dev";
 	const preidDelimiter = core.getInput("preid-num-delimiter") || ".";
 	const preidTemplate = core.getInput("preid-template") || "{preid}";
@@ -234,6 +251,7 @@ export async function run(): Promise<void> {
 	}
 
 	core.notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
+	core.setOutput("skip-publish", false);
 	core.setOutput("version", buildVersion);
 	core.setOutput("baseVersion", baseVersion);
 	core.setOutput("fileVersion", fileVersion); // 4-part numeric version e.g. '1.0.0.5' on pre-release, '1.0.0' on stable

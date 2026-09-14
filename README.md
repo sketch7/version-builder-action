@@ -79,6 +79,15 @@ both semver and non-semver variants as outputs.
 
 ## Outputs
 
+`skip-publish` is `true` when preflight recognizes a default-branch push that
+only advances the owned package to the next minor version (plus matching npm
+lockfile root versions). No version outputs are emitted in that case. Gate
+build/publish steps with `if: steps.version.outputs.skip-publish != 'true'`;
+skip release follow-ups when the published version is empty.
+Detection uses the full push range and checkout history, never a commit-message
+marker. Code/dependency changes, missing history, manual runs and explicit
+`version` inputs do not take this shortcut.
+
 | Output         | Example       | Description                                                                                                                                                                                                        |
 | -------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable. Patch is bumped when `on-version-conflict: bump-patch` resolved a tag collision.                                                                             |

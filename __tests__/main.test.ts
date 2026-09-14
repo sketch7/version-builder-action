@@ -6,8 +6,10 @@ import { run } from "../src/main";
 import { getCommitCountSinceFileChange, getCommitCountSinceMergeBase, listTagNames } from "../src/utils";
 // oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
+import { isVersionOnlyBump } from "../src/version-only-bump";
 
 vi.mock("@actions/core");
+vi.mock("../src/version-only-bump", () => ({ isVersionOnlyBump: vi.fn(() => false) }));
 vi.mock("@actions/github", () => ({
 	context: { ref: "refs/heads/feature/my-workflow", sha: "a".repeat(40), repo: { owner: "sketch7", repo: "version-builder-action" } },
 	getOctokit: vi.fn(),
@@ -218,6 +220,27 @@ async function* failingTagPages(error: Error): AsyncGenerator<unknown> {
 }
 
 describe("release preflight", () => {
+	test("version-only default-branch bumps stop before version resolution", async () => {
+		mockPreflightInputs({ version: "", "package-json-dir": "src/management" });
+		mockOctokit();
+		vi.mocked(isVersionOnlyBump).mockReturnValueOnce(true);
+		await run();
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("skip-publish", true);
+		expect(core.setOutput).not.toHaveBeenCalledWith("version", expect.anything());
+		expect(getCommitCountSinceFileChange).not.toHaveBeenCalled();
+		expect(isVersionOnlyBump).toHaveBeenCalledWith(expect.objectContaining({ packageJsonPath: "src/management/package.json" }));
+	});
+
+	test("explicit versions do not invoke automatic bump detection", async () => {
+		mockPreflightInputs();
+		mockOctokit();
+		await run();
+		expect(isVersionOnlyBump).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("skip-publish", false);
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
+	});
+
 	test("enabled rejects a tag template whose generated refs begin with a dash", async () => {
 		mockPreflightInputs({ "tag-tmpl": "-v{major}" });
 		mockOctokit({

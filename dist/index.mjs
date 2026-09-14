@@ -6,10 +6,13 @@ import * as fs from "fs";
 import { constants, existsSync, promises, readFileSync } from "fs";
 import * as path from "path";
 import * as events from "events";
+import { isDeepStrictEqual } from "node:util";
 import * as child from "child_process";
 import { execFileSync, execSync } from "child_process";
 import { setTimeout as setTimeout$1 } from "timers";
 import { readFile } from "fs/promises";
+import { execFileSync as execFileSync$1 } from "node:child_process";
+import { posix } from "node:path";
 
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -20359,6 +20362,63 @@ function validateResolvedRelease(input, state) {
 	};
 }
 
+function object(value) {
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected JSON object");
+	return value;
+}
+function stripLockVersion(lock, version) {
+	if (lock.version !== version) throw new Error("Lockfile version does not match package");
+	delete lock.version;
+	if (lock.packages !== void 0) {
+		const root = object(object(lock.packages)[""]);
+		if (root.version !== version) throw new Error("Lockfile root version does not match package");
+		delete root.version;
+	}
+}
+function isVersionOnlyBump(context) {
+	const { eventName, ref, defaultBranch, before, sha, cwd } = context;
+	const packageJsonPath = posix.normalize(context.packageJsonPath);
+	const commit = /^(?!0+$)[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+	if (eventName !== "push" || !defaultBranch || ref !== `refs/heads/${defaultBranch}` || !commit.test(before) || !commit.test(sha) || packageJsonPath.includes("\\") || posix.isAbsolute(packageJsonPath) || packageJsonPath.split("/").includes("..")) return false;
+	const git = (...args) => execFileSync$1("git", args, {
+		cwd,
+		encoding: "utf8",
+		stdio: [
+			"ignore",
+			"pipe",
+			"pipe"
+		]
+	});
+	try {
+		if (git("diff", "--summary", "--no-renames", before, sha, "--").trim()) return false;
+		const locks = ["package-lock.json", "npm-shrinkwrap.json"].map((file) => posix.join(posix.dirname(packageJsonPath), file));
+		const changed = git("diff", "--name-only", "--no-renames", "-z", before, sha, "--").split("\0").filter(Boolean);
+		if (!changed.includes(packageJsonPath) || changed.some((file) => file !== packageJsonPath && !locks.includes(file))) return false;
+		const read = (revision, file) => object(JSON.parse(git("show", `${revision}:${file}`)));
+		const oldPackage = read(before, packageJsonPath);
+		const newPackage = read(sha, packageJsonPath);
+		const { version: oldVersion } = oldPackage;
+		const { version: newVersion } = newPackage;
+		if (typeof oldVersion !== "string" || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(oldVersion)) return false;
+		const [major, minor = "0"] = oldVersion.split(".");
+		const nextVersion = `${major}.${BigInt(minor) + 1n}.0`;
+		if (newVersion !== nextVersion) return false;
+		delete oldPackage.version;
+		delete newPackage.version;
+		if (!isDeepStrictEqual(oldPackage, newPackage)) return false;
+		for (const file of changed.filter((name) => locks.includes(name))) {
+			const oldLock = read(before, file);
+			const newLock = read(sha, file);
+			stripLockVersion(oldLock, oldVersion);
+			stripLockVersion(newLock, nextVersion);
+			if (!isDeepStrictEqual(oldLock, newLock)) return false;
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 const BRANCH_REF_PREFIX = "refs/heads/";
 const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
 function getErrorMessage(error) {
@@ -20428,6 +20488,18 @@ async function run() {
 	let version = getInput("version");
 	const packageJsonDir = getInput("package-json-dir").replace(/^\/+|\/+$/g, "");
 	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
+	if (releasePreflight && !version && isVersionOnlyBump({
+		eventName: context.eventName,
+		ref: context.ref,
+		defaultBranch: context.payload?.repository?.default_branch ?? "",
+		before: context.payload?.before ?? "",
+		sha: context.sha,
+		packageJsonPath
+	})) {
+		notice("Skipping publication: this push only advances the next minor version.");
+		setOutput("skip-publish", true);
+		return;
+	}
 	const defaultPreid = getInput("preid") || "dev";
 	const preidDelimiter = getInput("preid-num-delimiter") || ".";
 	const preidTemplate = getInput("preid-template") || "{preid}";
@@ -20544,6 +20616,7 @@ async function run() {
 		return;
 	}
 	notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
+	setOutput("skip-publish", false);
 	setOutput("version", buildVersion);
 	setOutput("baseVersion", baseVersion);
 	setOutput("fileVersion", fileVersion);
