@@ -1,6 +1,6 @@
 {
   "name": "@ssv/version-builder-action",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=24"

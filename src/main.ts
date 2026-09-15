@@ -4,9 +4,11 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { readFile } from "fs/promises";
 
+import { findReleaseAtCommit, loadLiveTags, loadResolvedReleaseState, validateResolvedRelease } from "./release-preflight";
+import type { ReleasePreflightClient, ReleaseState, ReleaseValidation } from "./release-preflight";
 import {
-	coerceArray,
 	formatPreid,
+	formatReleaseTags,
 	getCommitCountSinceFileChange,
 	getCommitCountSinceMergeBase,
 	isLatestStableMajor,
@@ -17,15 +19,60 @@ import {
 	resolveVersionConflict,
 	sanitizeBranchName,
 	stripPreid,
+	validateGitTag,
 	validatePrereleaseSuffix,
 } from "./utils";
 import type { VersionConflictMode } from "./utils";
+import { isVersionOnlyBump } from "./version-only-bump";
 
-function getExistingTags(isPreRel: boolean): string[] {
+const BRANCH_REF_PREFIX = "refs/heads/";
+const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
+
+interface PreflightContext {
+	branch: string;
+	expectedSha: string;
+	client: ReleasePreflightClient;
+}
+
+function getErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+
+function getPreflightContext(token: string): PreflightContext {
+	if (!token) {
+		throw new Error("github-token is required when release-preflight is enabled");
+	}
+
+	const { ref, sha, repo } = github.context;
+	if (!ref.startsWith(BRANCH_REF_PREFIX)) {
+		throw new Error(`GitHub context ref '${ref}' must name a branch`);
+	}
+	const branch = ref.slice(BRANCH_REF_PREFIX.length);
+	try {
+		validateGitTag(branch);
+	} catch {
+		throw new Error(`GitHub context ref '${ref}' is not a canonical branch ref`);
+	}
+	if (!COMMIT_SHA.test(sha)) {
+		throw new Error("GitHub context SHA must be a canonical commit SHA");
+	}
+
+	const octokit = github.getOctokit(token);
+	const client: ReleasePreflightClient = {
+		getRef: async gitRef => (await octokit.rest.git.getRef({ ...repo, ref: gitRef })).data,
+		listTagPages: () => octokit.paginate.iterator(octokit.rest.git.listMatchingRefs, { ...repo, ref: "tags/" }),
+		getGitObject: async tagSha => (await octokit.rest.git.getTag({ ...repo, tag_sha: tagSha })).data,
+		listReleasePages: () => octokit.paginate.iterator(octokit.rest.repos.listReleases, { ...repo }),
+	};
+
+	return { branch, expectedSha: sha, client };
+}
+
+async function getExistingTags(isPreRel: boolean, preflight: PreflightContext | null): Promise<string[]> {
 	if (isPreRel) {
 		return [];
 	}
-	return listTagNames();
+	return preflight === null ? listTagNames() : loadLiveTags(preflight.client);
 }
 
 function getBranchSlug(preidTemplate: string, branch: string): string {
@@ -43,12 +90,52 @@ function getPreidCounter(isPreRel: boolean, counterBaseRef: string, packageJsonP
 	return counterBaseRef ? getCommitCountSinceMergeBase(counterBaseRef) : getCommitCountSinceFileChange(packageJsonPath, undefined, '"version":');
 }
 
+function validateStableBranchMajor(branch: string, resolvedMajor: string): void {
+	const branchMajor = /^v(?<major>\d+)$/.exec(branch)?.groups?.major;
+	if (branchMajor === undefined) {
+		return;
+	}
+
+	const normalizedBranchMajor = branchMajor.replace(/^0+(?=\d)/, "");
+	const normalizedResolvedMajor = resolvedMajor.replace(/^0+(?=\d)/, "");
+	if (normalizedBranchMajor !== normalizedResolvedMajor) {
+		throw new Error(`Stable branch '${branch}' must match resolved version major '${resolvedMajor}'`);
+	}
+}
+
+// oxlint-disable-next-line complexity -- The public action contract resolves its inputs in one ordered workflow.
 export async function run(): Promise<void> {
-	const branch = github.context.ref.replace("refs/heads/", "");
+	const releasePreflight = core.getBooleanInput("release-preflight");
+	let preflight: PreflightContext | null = null;
+	if (releasePreflight) {
+		try {
+			preflight = getPreflightContext(core.getInput("github-token"));
+		} catch (error) {
+			core.setFailed(getErrorMessage(error));
+			return;
+		}
+	}
+	const branch = preflight?.branch ?? github.context.ref.replace(BRANCH_REF_PREFIX, "");
 
 	let version = core.getInput("version");
 	const packageJsonDir = core.getInput("package-json-dir").replace(/^\/+|\/+$/g, "");
 	const packageJsonPath = packageJsonDir ? `${packageJsonDir}/package.json` : "package.json";
+	if (
+		releasePreflight &&
+		!version &&
+		isVersionOnlyBump({
+			eventName: github.context.eventName,
+			ref: github.context.ref,
+			defaultBranch: github.context.payload?.repository?.default_branch ?? "",
+			before: github.context.payload?.before ?? "",
+			sha: github.context.sha,
+			packageJsonPath,
+		})
+	) {
+		core.notice("Skipping publication: this push only advances the next minor version.");
+		core.setOutput("skip-publish", true);
+		return;
+	}
 	const defaultPreid = core.getInput("preid") || "dev";
 	const preidDelimiter = core.getInput("preid-num-delimiter") || ".";
 	const preidTemplate = core.getInput("preid-template") || "{preid}";
@@ -68,20 +155,43 @@ export async function run(): Promise<void> {
 	let fileVersion = baseVersion;
 
 	const preidBranches = parsePreidBranches(
-		preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main:rc", "master:rc", "develop:dev", "vnext:next"],
+		preidBranchesInput ? preidBranchesInput.split(",") : ["main:rc", "master:rc", "develop:dev", "vnext:next"],
 	);
-	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
+	const stableBranches = stableBranchesInput ? stableBranchesInput.split(",") : ["^v\\d+$", "^\\d+\\.x$"];
 
 	let versionSuffix: string | undefined;
 	const versionSegments = baseVersion.split(".");
-	const [major, minor, initialPatch] = versionSegments;
+	const [major = "", minor = "", initialPatch = ""] = versionSegments;
 	let patch = initialPatch;
 
 	const resolvedPreid = resolvePreid({ branch, preidBranches, stableBranches, defaultPreid, forcePreid, forceStable });
 	const isPreRel = resolvedPreid !== null;
 	const branchSlug = getBranchSlug(preidTemplate, branch);
 	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
-	const existingTags = getExistingTags(isPreRel);
+	let existingTags: string[];
+	let candidateState: ReleaseState | null = null;
+	try {
+		if (preflight !== null && !isPreRel) {
+			validateStableBranchMajor(branch, major);
+		}
+		existingTags = await getExistingTags(isPreRel, preflight);
+		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
+			const recovery = await findReleaseAtCommit(
+				{ branch, expectedSha: preflight.expectedSha, version: baseVersion, tagTmpl },
+				existingTags,
+				preflight.client,
+			);
+			if (recovery !== null) {
+				candidateState = recovery.state;
+				baseVersion = recovery.version;
+				fileVersion = recovery.version;
+				[, , patch] = recovery.version.split(".");
+			}
+		}
+	} catch (error) {
+		core.setFailed(getErrorMessage(error));
+		return;
+	}
 	const commitCount = getPreidCounter(isPreRel, counterBaseRef, packageJsonPath);
 	core.info(
 		`forcePreid: ${forcePreid}, Branch: ${branch}, contextRef: ${github.context.ref}, version: ${version}, commitCount: ${commitCount}, preidBranches: ${JSON.stringify(preidBranches)}, stableBranches: ${JSON.stringify(stableBranches)}`,
@@ -96,15 +206,15 @@ export async function run(): Promise<void> {
 		if (versionSegments.length === 3) {
 			fileVersion = `${baseVersion}.${commitCount}`;
 		}
-	} else if (versionSegments.length === 3) {
+	} else if (versionSegments.length === 3 && candidateState === null) {
 		try {
 			const result = resolveVersionConflict({
-				major: Number(major),
-				minor: Number(minor),
-				patch: Number(patch),
+				major,
+				minor,
+				patch,
 				tagTmpl,
 				mode: onVersionConflict,
-				existingTags: onVersionConflict === "ignore" ? [] : existingTags,
+				existingTags,
 			});
 			const { baseVersion: bumpedVersion, bumped } = result;
 			if (bumped) {
@@ -113,8 +223,8 @@ export async function run(): Promise<void> {
 				fileVersion = bumpedVersion;
 				patch = String(result.patch);
 			}
-		} catch (err) {
-			core.setFailed((err as Error).message);
+		} catch (error) {
+			core.setFailed(getErrorMessage(error));
 			return;
 		}
 	}
@@ -122,10 +232,23 @@ export async function run(): Promise<void> {
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;
 	const preidOutput = formattedPreid ?? "";
 
-	const isLatest = isPreRel ? false : isLatestStableMajor(Number(major), existingTags, tagTmpl);
-	const tag = resolveTag({ resolvedPreid: formattedPreid, currentMajor: Number(major), isLatest });
+	const isLatest = isPreRel ? false : isLatestStableMajor(major, existingTags, tagTmpl);
+	const tag = resolveTag({ resolvedPreid: formattedPreid, currentMajor: major, isLatest });
+	let releaseValidation: ReleaseValidation | null = null;
+	if (preflight !== null) {
+		try {
+			const { exactTag } = formatReleaseTags(buildVersion, tagTmpl);
+			const releaseState =
+				candidateState?.exactTag === exactTag ? candidateState : await loadResolvedReleaseState({ branch, exactTag }, preflight.client);
+			releaseValidation = validateResolvedRelease({ expectedSha: preflight.expectedSha, version: buildVersion, tagTmpl }, releaseState);
+		} catch (error) {
+			core.setFailed(getErrorMessage(error));
+			return;
+		}
+	}
 
 	core.notice(`Version: ${buildVersion}, fileVersion: ${fileVersion}, tag: ${tag}`);
+	core.setOutput("skip-publish", false);
 	core.setOutput("version", buildVersion);
 	core.setOutput("baseVersion", baseVersion);
 	core.setOutput("fileVersion", fileVersion); // 4-part numeric version e.g. '1.0.0.5' on pre-release, '1.0.0' on stable
@@ -138,4 +261,8 @@ export async function run(): Promise<void> {
 	core.setOutput("isPrerelease", isPreRel);
 	core.setOutput("isLatest", isLatest);
 	core.setOutput("tag", tag);
+	if (releaseValidation !== null) {
+		core.setOutput("exactTag", releaseValidation.exactTag);
+		core.setOutput("floatingTag", releaseValidation.floatingTag);
+	}
 }

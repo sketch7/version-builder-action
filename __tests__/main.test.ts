@@ -6,10 +6,13 @@ import { run } from "../src/main";
 import { getCommitCountSinceFileChange, getCommitCountSinceMergeBase, listTagNames } from "../src/utils";
 // oxlint-disable-next-line import/no-namespace -- Required for Vitest importOriginal<typeof utils>()
 import type * as utils from "../src/utils";
+import { isVersionOnlyBump } from "../src/version-only-bump";
 
 vi.mock("@actions/core");
+vi.mock("../src/version-only-bump", () => ({ isVersionOnlyBump: vi.fn(() => false) }));
 vi.mock("@actions/github", () => ({
-	context: { ref: "refs/heads/feature/my-workflow" },
+	context: { ref: "refs/heads/feature/my-workflow", sha: "a".repeat(40), repo: { owner: "sketch7", repo: "version-builder-action" } },
+	getOctokit: vi.fn(),
 }));
 vi.mock("../src/utils", async importOriginal => {
 	const actual = await importOriginal<typeof utils>();
@@ -100,6 +103,391 @@ const dataset = [
 	},
 ];
 
+const EXPECTED_SHA = "a".repeat(40);
+
+function apiError(message: string, status?: number): Error & { status?: number } {
+	return Object.assign(new Error(message), { status });
+}
+
+function tagPage(...names: string[]): {
+	data: { ref: string; object: { type: "commit"; sha: string } }[];
+} {
+	return {
+		data: names.map(name => ({ ref: `refs/tags/${name}`, object: { type: "commit", sha: EXPECTED_SHA } })),
+	};
+}
+
+function releasePage(...releases: unknown[]): { data: unknown[] } {
+	return { data: releases };
+}
+
+function releaseRecord(tagName: string, draft = false, prerelease = false): Record<string, unknown> {
+	return { tag_name: tagName, draft, prerelease };
+}
+
+async function* tagPages(...pages: unknown[]): AsyncGenerator<unknown> {
+	for (const page of pages) {
+		yield page;
+	}
+}
+
+function mockPreflightInputs(overrides: Record<string, string> = {}): void {
+	vi.mocked(github).context = {
+		ref: "refs/heads/v3",
+		sha: EXPECTED_SHA,
+		repo: { owner: "sketch7", repo: "version-builder-action" },
+	} as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: "3.0.0",
+			preid: "dev",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+			"on-version-conflict": "bump-patch",
+			"tag-tmpl": "v{major}",
+			"release-preflight": "true",
+			"github-token": "test-token",
+			...overrides,
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockImplementation(name => name === "release-preflight");
+}
+
+function mockOctokit(
+	overrides: {
+		pages?: unknown[];
+		releasePages?: unknown[];
+		branchSha?: string;
+		listError?: Error;
+		releaseError?: Error;
+		getRef?: (ref: string) => Promise<unknown>;
+	} = {},
+): { paginate: { iterator: ReturnType<typeof vi.fn> }; tagIterator: ReturnType<typeof vi.fn>; releaseIterator: ReturnType<typeof vi.fn> } {
+	const listMatchingRefs = vi.fn();
+	const listReleases = vi.fn();
+	const tagIterator = vi.fn(() => {
+		if (overrides.listError) {
+			return failingTagPages(overrides.listError);
+		}
+		return tagPages(...(overrides.pages ?? [tagPage("v3.0.0"), tagPage("v3.0.1", "v4.0.0")]));
+	});
+	const releaseIterator = vi.fn(() => {
+		if (overrides.releaseError) {
+			return failingTagPages(overrides.releaseError);
+		}
+		return tagPages(...(overrides.releasePages ?? [releasePage(releaseRecord("v9.0.0")), releasePage(releaseRecord("v8.0.0"))]));
+	});
+	const octokit = {
+		paginate: {
+			iterator: vi.fn((endpoint: unknown) => {
+				if (endpoint === listMatchingRefs) {
+					return tagIterator();
+				}
+				return releaseIterator();
+			}),
+		},
+		rest: {
+			git: {
+				listMatchingRefs,
+				getRef: vi.fn(async ({ ref }: { ref: string }) => {
+					if (overrides.getRef) {
+						return { data: await overrides.getRef(ref) };
+					}
+					if (ref.startsWith("heads/")) {
+						return { data: { object: { type: "commit", sha: overrides.branchSha ?? EXPECTED_SHA } } };
+					}
+					if (["tags/v3.0.0", "tags/v3.0.1", "tags/v4.0.0"].includes(ref)) {
+						return { data: { object: { type: "commit", sha: "b".repeat(40) } } };
+					}
+					throw apiError(`Reference ${ref} not found`, 404);
+				}),
+				getTag: vi.fn(),
+			},
+			repos: {
+				listReleases,
+			},
+		},
+	};
+	vi.mocked(github.getOctokit).mockReturnValue(octokit as never);
+	return { ...octokit, tagIterator, releaseIterator };
+}
+
+async function* failingTagPages(error: Error): AsyncGenerator<unknown> {
+	yield* tagPages();
+	throw error;
+}
+
+describe("release preflight", () => {
+	test("version-only default-branch bumps stop before version resolution", async () => {
+		mockPreflightInputs({ version: "", "package-json-dir": "src/management" });
+		mockOctokit();
+		vi.mocked(isVersionOnlyBump).mockReturnValueOnce(true);
+		await run();
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("skip-publish", true);
+		expect(core.setOutput).not.toHaveBeenCalledWith("version", expect.anything());
+		expect(getCommitCountSinceFileChange).not.toHaveBeenCalled();
+		expect(isVersionOnlyBump).toHaveBeenCalledWith(expect.objectContaining({ packageJsonPath: "src/management/package.json" }));
+	});
+
+	test("explicit versions do not invoke automatic bump detection", async () => {
+		mockPreflightInputs();
+		mockOctokit();
+		await run();
+		expect(isVersionOnlyBump).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("skip-publish", false);
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
+	});
+
+	test("enabled rejects a tag template whose generated refs begin with a dash", async () => {
+		mockPreflightInputs({ "tag-tmpl": "-v{major}" });
+		mockOctokit({
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/-v3.0.0") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+		});
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("Invalid Git tag"));
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("disabled preserves local versioning without reading a token or calling GitHub", async () => {
+		mockPreflightInputs({ "release-preflight": "false", "github-token": "must-not-be-read" });
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+		vi.mocked(listTagNames).mockReturnValue(["v3.0.0"]);
+
+		await run();
+
+		expect(core.getInput).not.toHaveBeenCalledWith("github-token");
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(listTagNames).toHaveBeenCalledOnce();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.1");
+		expect(core.setOutput).not.toHaveBeenCalledWith("exactTag", expect.anything());
+	});
+
+	test.each([
+		["a non-branch ref", "refs/tags/v3", EXPECTED_SHA],
+		["a noncanonical commit SHA", "refs/heads/v3", "not-a-sha"],
+		["a 41-character commit SHA", "refs/heads/v3", "a".repeat(41)],
+		["a 63-character commit SHA", "refs/heads/v3", "a".repeat(63)],
+	])("enabled rejects %s before calling GitHub", async (_name, ref, sha) => {
+		mockPreflightInputs();
+		vi.mocked(github).context = {
+			ref,
+			sha,
+			repo: { owner: "sketch7", repo: "version-builder-action" },
+		} as typeof github.context;
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledOnce();
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("enabled rejects a missing token before emitting outputs or calling GitHub", async () => {
+		mockPreflightInputs({ "github-token": "" });
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith("github-token is required when release-preflight is enabled");
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("enabled rejects a stable version whose vN branch has another major", async () => {
+		mockPreflightInputs({ version: "2.0.0" });
+		const octokit = mockOctokit();
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("Stable branch 'v3' must match resolved version major '2'"));
+		expect(octokit.tagIterator).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("disabled calculation preserves a stable vN branch with another major", async () => {
+		mockPreflightInputs({ version: "2.0.0", "release-preflight": "false" });
+		vi.mocked(core.getBooleanInput).mockReturnValue(false);
+		vi.mocked(listTagNames).mockReturnValue([]);
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(github.getOctokit).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "2.0.0");
+	});
+
+	test("preflight preserves a forced prerelease preview on a mismatched stable branch", async () => {
+		mockPreflightInputs({ version: "2.0.0", "force-preid": "true" });
+		vi.mocked(core.getBooleanInput).mockImplementation(name => name === "release-preflight" || name === "force-preid");
+		const octokit = mockOctokit();
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "2.0.0-dev.0");
+		expect(core.setOutput).toHaveBeenCalledWith("isPrerelease", true);
+		expect(octokit.tagIterator).not.toHaveBeenCalled();
+	});
+
+	test("enabled resolves a stable bump from paginated live tags and emits validated release tags", async () => {
+		mockPreflightInputs();
+		const octokit = mockOctokit();
+		vi.mocked(listTagNames).mockReturnValue(["v99.0.0"]);
+
+		await run();
+
+		expect(github.getOctokit).toHaveBeenCalledWith("test-token");
+		expect(octokit.tagIterator).toHaveBeenCalledOnce();
+		expect(listTagNames).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
+		expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
+		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.2");
+		expect(core.setOutput).toHaveBeenCalledWith("floatingTag", "v3");
+	});
+
+	test.each(["bump-patch", "fail"])("enabled recovers a matching exact tag before applying the %s conflict policy", async onVersionConflict => {
+		mockPreflightInputs({ "on-version-conflict": onVersionConflict });
+		const octokit = mockOctokit({
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/v3.0.0") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+			releasePages: [],
+		});
+
+		await run();
+
+		expect(core.setFailed).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0");
+		expect(core.setOutput).toHaveBeenCalledWith("baseVersion", "3.0.0");
+		expect(core.setOutput).toHaveBeenCalledWith("patchVersion", "0");
+		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.0");
+		expect(octokit.tagIterator).toHaveBeenCalledOnce();
+	});
+
+	test("enabled rejects a completed exact release even with the ignore conflict policy", async () => {
+		mockPreflightInputs({ "on-version-conflict": "ignore" });
+		mockOctokit({
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/v3.0.0") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+			releasePages: [releasePage(releaseRecord("v3.0.0"))],
+		});
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("already released"));
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test.each([false, true])("retries an allocated hotfix without creating another version (completed=%s)", async completed => {
+		mockPreflightInputs();
+		mockOctokit({
+			pages: [tagPage("v3.0.0", "v3.0.1")],
+			releasePages: completed ? [releasePage(releaseRecord("v3.0.1"))] : [],
+			getRef: async ref => {
+				if (ref === "heads/v3" || ref === "tags/v3.0.1") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				if (ref === "tags/v3.0.0") {
+					return { object: { type: "commit", sha: "b".repeat(40) } };
+				}
+				throw apiError("missing", 404);
+			},
+		});
+		await run();
+		if (completed) {
+			expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("already released"));
+			expect(core.setOutput).not.toHaveBeenCalled();
+		} else {
+			expect(core.setFailed).not.toHaveBeenCalled();
+			expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.1");
+		}
+	});
+
+	test.each(["bump-patch", "fail"])("enabled applies %s when the candidate tag targets another commit", async onVersionConflict => {
+		mockPreflightInputs({ "on-version-conflict": onVersionConflict });
+		mockOctokit({
+			pages: [tagPage("v3.0.0", "v3.0.1")],
+			getRef: async ref => {
+				if (ref === "heads/v3") {
+					return { object: { type: "commit", sha: EXPECTED_SHA } };
+				}
+				if (ref === "tags/v3.0.0" || ref === "tags/v3.0.1") {
+					return { object: { type: "commit", sha: "b".repeat(40) } };
+				}
+				throw apiError(`Reference ${ref} not found`, 404);
+			},
+		});
+
+		await run();
+
+		if (onVersionConflict === "bump-patch") {
+			expect(core.setFailed).not.toHaveBeenCalled();
+			expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.2");
+		} else {
+			expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("Tag 'v3.0.0' already exists"));
+			expect(core.setOutput).not.toHaveBeenCalled();
+		}
+	});
+
+	test("enabled validates and emits tags for a prerelease without consulting stable tags", async () => {
+		mockPreflightInputs({ "release-preflight": "true" });
+		vi.mocked(github).context = {
+			ref: "refs/heads/main",
+			sha: EXPECTED_SHA,
+			repo: { owner: "sketch7", repo: "version-builder-action" },
+		} as typeof github.context;
+		const octokit = mockOctokit();
+
+		await run();
+
+		expect(octokit.tagIterator).not.toHaveBeenCalled();
+		expect(octokit.releaseIterator).toHaveBeenCalledOnce();
+		expect(listTagNames).not.toHaveBeenCalled();
+		expect(core.setOutput).toHaveBeenCalledWith("version", "3.0.0-rc.0");
+		expect(core.setOutput).toHaveBeenCalledWith("exactTag", "v3.0.0-rc.0");
+		expect(core.setOutput).toHaveBeenCalledWith("floatingTag", "v3");
+	});
+
+	test("enabled rejects a stale branch before emitting any outputs", async () => {
+		mockPreflightInputs();
+		mockOctokit({ branchSha: "b".repeat(40) });
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("current branch head"));
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+
+	test("enabled reports a live API failure without falling back to local tags", async () => {
+		mockPreflightInputs();
+		const error = apiError("API rate limit exceeded", 429);
+		mockOctokit({ listError: error });
+		vi.mocked(listTagNames).mockReturnValue([]);
+
+		await run();
+
+		expect(core.setFailed).toHaveBeenCalledWith("API rate limit exceeded");
+		expect(listTagNames).not.toHaveBeenCalled();
+		expect(core.setOutput).not.toHaveBeenCalled();
+	});
+});
+
 test.each(dataset)("given $name - outputs should match expected", async ({ input, expected }) => {
 	vi.mocked(github).context = { ref: input.ref } as typeof github.context;
 	vi.mocked(core.getInput).mockImplementation((name: string) => {
@@ -185,6 +573,34 @@ test("stable versions in an older major use the LTS tag and report isLatest fals
 
 	expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
 	expect(core.setOutput).toHaveBeenCalledWith("tag", "v3-lts");
+});
+
+test("stable action decisions preserve adjacent huge major, minor, and patch components", async () => {
+	const major = "9007199254740993";
+	const minor = "9007199254740993";
+	const patch = "9007199254740993";
+	vi.mocked(github).context = { ref: `refs/heads/v${major}` } as typeof github.context;
+	vi.mocked(core.getInput).mockImplementation((name: string) => {
+		const map: Record<string, string> = {
+			version: `${major}.${minor}.${patch}`,
+			preid: "dev",
+			"preid-branches": "main:rc,master:rc,develop:dev",
+			"stable-branches": "^v\\d+$,^\\d+\\.x$",
+			"preid-num-delimiter": ".",
+			"on-version-conflict": "fail",
+			"tag-tmpl": "v{major}",
+		};
+		return map[name] ?? "";
+	});
+	vi.mocked(core.getBooleanInput).mockReturnValue(false);
+	vi.mocked(listTagNames).mockReturnValue([`v${major}.${minor}.${BigInt(patch) - 1n}`, `v${BigInt(major) + 1n}.0.0`]);
+
+	await run();
+
+	expect(core.setFailed).not.toHaveBeenCalled();
+	expect(core.setOutput).toHaveBeenCalledWith("version", `${major}.${minor}.${patch}`);
+	expect(core.setOutput).toHaveBeenCalledWith("isLatest", false);
+	expect(core.setOutput).toHaveBeenCalledWith("tag", `v${major}-lts`);
 });
 
 describe("prerelease suffix validation", () => {

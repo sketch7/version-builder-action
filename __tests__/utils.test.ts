@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+	formatReleaseTags,
 	formatPreid,
 	getCommitCountSinceMergeBase,
 	getCommitCountSinceFileChange,
@@ -9,6 +10,7 @@ import {
 	listTagNames,
 	matchesBranchPattern,
 	parsePreidBranches,
+	parseCanonicalVersion,
 	parseStableTagMajor,
 	resolvePreid,
 	resolveTag,
@@ -16,9 +18,102 @@ import {
 	sanitizeBranchName,
 	stripPreid,
 	isLatestStableMajor,
+	validateGitTag,
 } from "../src/utils";
 
 const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"];
+
+describe("parseCanonicalVersion", () => {
+	test.each([
+		["stable version", "1.3.0", { version: "1.3.0", major: "1", minor: "3", patch: "0", isPrerelease: false }],
+		["prerelease version", "1.3.0-rc.5", { version: "1.3.0-rc.5", major: "1", minor: "3", patch: "0", isPrerelease: true }],
+	])("parses a canonical $0", (_name, version, expected) => {
+		expect(parseCanonicalVersion(version)).toEqual(expected);
+	});
+
+	test.each(["01.3.0", "1.03.0", "1.3.00", "1.3", "1.3.0+build.1"])("rejects non-canonical version %s", version => {
+		expect(() => parseCanonicalVersion(version)).toThrow("canonical SemVer");
+	});
+
+	test.each(["1.3.0-01", "1.3.0-rc.05"])("rejects numeric prerelease identifiers with leading zeroes: %s", version => {
+		expect(() => parseCanonicalVersion(version)).toThrow("canonical SemVer");
+	});
+
+	test("rejects an adversarially long malformed prerelease without pathological backtracking", () => {
+		const prerelease = "a".repeat(50_000);
+		const startedAt = performance.now();
+
+		expect(() => parseCanonicalVersion(`1.3.0-${prerelease}.`)).toThrow("canonical SemVer");
+		expect(performance.now() - startedAt).toBeLessThan(1_000);
+	});
+
+	test("preserves large canonical components without numeric coercion", () => {
+		const major = "9".repeat(1_000);
+		const minor = "8".repeat(1_000);
+		const patch = "7".repeat(1_000);
+
+		expect(parseCanonicalVersion(`${major}.${minor}.${patch}`)).toEqual({
+			version: `${major}.${minor}.${patch}`,
+			major,
+			minor,
+			patch,
+			isPrerelease: false,
+		});
+	});
+});
+
+describe("formatReleaseTags", () => {
+	test("formats exact and floating tags from the canonical major marker", () => {
+		expect(formatReleaseTags("1.3.0", "v{major}")).toEqual({ exactTag: "v1.3.0", floatingTag: "v1" });
+	});
+
+	test("formats prerelease tags", () => {
+		expect(formatReleaseTags("1.3.0-rc.5", "v{major}")).toEqual({ exactTag: "v1.3.0-rc.5", floatingTag: "v1" });
+	});
+
+	test("formats nested tags with a prefix and suffix", () => {
+		expect(formatReleaseTags("1.3.0", "release/v{major}-stable")).toEqual({
+			exactTag: "release/v1.3.0-stable",
+			floatingTag: "release/v1-stable",
+		});
+	});
+
+	test.each(["v{major}-{major}", "v1"])('rejects tag template "%s" without exactly one major marker', tagTmpl => {
+		expect(() => formatReleaseTags("1.3.0", tagTmpl)).toThrow("exactly one {major}");
+	});
+
+	test.each(["release {major}", "release..{major}", "release@{{major}", "release-{major}.lock"])(
+		"rejects invalid generated tag template %s",
+		tagTmpl => {
+			expect(() => formatReleaseTags("1.3.0", tagTmpl)).toThrow("Invalid Git tag");
+		},
+	);
+
+	test("rejects generated refs beginning with a dash like release finalization", () => {
+		expect(() => formatReleaseTags("1.3.0", "-v{major}")).toThrow("Invalid Git tag");
+	});
+});
+
+describe("validateGitTag", () => {
+	test.each([
+		"v1  ",
+		"release..candidate",
+		"release@{candidate",
+		"release.lock",
+		"release~candidate",
+		"release:candidate",
+		"release?candidate",
+		"release*candidate",
+		"release[candidate",
+		"release\\candidate",
+	])("rejects invalid Git tag %s", tag => {
+		expect(() => validateGitTag(tag)).toThrow("Invalid Git tag");
+	});
+
+	test.each(["@", "release/v1.3.0"])("accepts complete Git tag %s", tag => {
+		expect(() => validateGitTag(tag)).not.toThrow();
+	});
+});
 
 describe("sanitizeBranchName", () => {
 	test.each([
@@ -536,6 +631,23 @@ describe("resolveVersionConflict", () => {
 			}),
 		).toEqual({ baseVersion: "1.0.2", patch: 2, bumped: true });
 	});
+
+	test("compares adjacent huge components exactly during conflict resolution", () => {
+		const major = "9007199254740993";
+		const minor = "9007199254740993";
+		const patch = "9007199254740993";
+
+		expect(
+			resolveVersionConflict({
+				major,
+				minor,
+				patch,
+				tagTmpl: "v{major}",
+				mode: "bump-patch",
+				existingTags: [`v${major}.${minor}.${patch}`],
+			}),
+		).toEqual({ baseVersion: `${major}.${minor}.9007199254740994`, patch: "9007199254740994", bumped: true });
+	});
 });
 
 describe("parseStableTagMajor", () => {
@@ -552,6 +664,10 @@ describe("parseStableTagMajor", () => {
 	])("parses stable tag %s", (tag, template, expected) => {
 		expect(parseStableTagMajor(tag, template)).toBe(expected);
 	});
+
+	test("preserves adjacent huge major values as decimal strings", () => {
+		expect(parseStableTagMajor("v9007199254740993.0.0", "v{major}")).toBe("9007199254740993");
+	});
 });
 
 describe("isLatestStableMajor", () => {
@@ -567,6 +683,10 @@ describe("isLatestStableMajor", () => {
 		const tags = Array.from({ length: 101 }, (_, index) => `v${index + 1}.0.0`);
 		expect(isLatestStableMajor(101, tags, "v{major}")).toBe(true);
 		expect(isLatestStableMajor(100, tags, "v{major}")).toBe(false);
+	});
+
+	test("does not equate adjacent huge stable majors", () => {
+		expect(isLatestStableMajor("9007199254740992", ["v9007199254740993.0.0"], "v{major}")).toBe(false);
 	});
 });
 
@@ -589,5 +709,9 @@ describe("resolveTag", () => {
 		},
 	])("given $name - should be $expected", ({ input, expected }) => {
 		expect(resolveTag(input)).toBe(expected);
+	});
+
+	test("keeps an adjacent huge major in the LTS dist-tag", () => {
+		expect(resolveTag({ resolvedPreid: null, currentMajor: "9007199254740993", isLatest: false })).toBe("v9007199254740993-lts");
 	});
 });

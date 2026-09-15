@@ -63,18 +63,40 @@ inputs:
     default: ""
   tag-tmpl:
     required: false
-    description: "Tag template used to parse local stable tags for latest-major selection and to
-      check version conflicts. Use `{major}` as placeholder e.g. 'v{major}' matches tag 'v1.5.6'."
+    description: "Tag template for latest-major selection and version conflicts. Uses local tags
+      by default and live GitHub tags with preflight. Use `{major}` as placeholder
+      e.g. 'v{major}' matches tag 'v1.5.6'. Preflight requires exactly one marker
+      and validates the generated exact and floating Git refs."
     default: "v{major}"
   on-version-conflict:
     required: false
     description: "Behavior when a stable (non-preid) version's git tag already exists:
-      'ignore' (default, no check — fully backward compatible), 'fail', or 'bump-patch'
-      (auto-increments the patch until a free tag is found)."
+      'ignore' (default, no local conflict check), 'fail', or 'bump-patch'
+      (auto-increments the patch until a free tag is found).
+      Preflight validates the final release even with 'ignore' and recovers unfinished
+      same-commit tags before applying this policy."
     default: "ignore"
+  release-preflight:
+    required: false
+    description: "When true, use live GitHub release state to validate the resolved version
+      before it is emitted. Requires github-token with contents: write so draft releases are
+      visible. Completed releases fail before publication; unfinished same-commit tags can
+      be recovered. Default-branch pushes that only bump package.json to the next minor
+      (and matching npm lockfile root versions) return skip-publish without a version.
+      Requires full checkout history. Explicit version inputs bypass bump detection.
+      The action never mutates GitHub releases."
+    default: "false"
+  github-token:
+    required: false
+    description: "GitHub token used only when release-preflight is true. The workflow needs
+      contents: write permission so paginated release listings include drafts. The action only
+      reads GitHub state and never mutates releases."
 
 # Define your outputs here.
 outputs:
+  skip-publish:
+    description: "True for a version-only next-minor bump with release-preflight enabled.
+      No version outputs are emitted; callers must skip publication and release follow-ups."
   version:
     description: "Build version generated e.g. '1.5.6-dev.123'. Patch is bumped when
       on-version-conflict: bump-patch resolved a tag collision."
@@ -98,10 +120,16 @@ outputs:
     description: "Returns whether the version is a prerelease version e.g. 'true' or
       'false'."
   isLatest:
-    description: "Returns whether a stable version belongs to the highest major parsed from local
-      tags matching tag-tmpl e.g. 'true' or 'false'. Always 'false' for prereleases."
+    description: "Returns whether a stable version belongs to the highest major parsed from tags
+      matching tag-tmpl e.g. 'true' or 'false'. Default mode uses local tags; release-preflight
+      uses live GitHub tags. Always 'false' for prereleases."
   tag:
-    description: "Returns the dist-tag for the build e.g. formatted preid, 'latest', or 'v1-lts'."
+    description: "Returns the dist-tag for the build e.g. formatted preid, 'latest', or 'v1-lts'.
+      Stable-major selection uses local tags by default and live GitHub tags with release-preflight."
+  exactTag:
+    description: "Validated exact Git tag for the resolved version when release-preflight is enabled and a version is emitted."
+  floatingTag:
+    description: "Validated floating major Git tag when release-preflight is enabled and a version is emitted."
 
 runs:
   using: "node24"
