@@ -443,7 +443,7 @@ function formatStableTag(tagTmpl: string, version: { major: string; minor: strin
 
 /**
  * Resolves a stable `major.minor.patch` version against existing git tags.
- * `mode: "ignore"` returns the version unchanged (default, non-breaking).
+ * `mode: "ignore"` skips tag conflicts after validating the numeric components (default).
  * `mode: "bump-patch"` increments the patch until a free tag is found.
  * `mode: "fail"` throws when the exact tag already exists.
  */
@@ -458,10 +458,7 @@ export function resolveVersionConflict(input: {
 	const major = toDecimalString(input.major, "major version");
 	const minor = toDecimalString(input.minor, "minor version");
 	let patch = toDecimalString(input.patch, "patch version");
-	const patchOutput = (value: string): string | number => {
-		const numericValue = Number(value);
-		return typeof input.patch === "number" && Number.isSafeInteger(numericValue) && String(numericValue) === value ? numericValue : value;
-	};
+	const patchOutput = (value: string): DecimalComponent => (typeof input.patch === "number" ? toCompatibleDecimal(value) : value);
 	const { tagTmpl, mode, existingTags } = input;
 
 	if (mode === "ignore") {

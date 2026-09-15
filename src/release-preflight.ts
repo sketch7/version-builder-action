@@ -1,6 +1,6 @@
 import { compareDecimalStrings, formatReleaseTags, parseCanonicalVersion, validateGitTag } from "./utils";
 
-const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
+const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const TAG_REF_PREFIX = "refs/tags/";
 
 export interface ExistingRelease {
@@ -35,8 +35,9 @@ export interface ValidateResolvedReleaseInput {
 /**
  * GitHub boundary for live release preflight checks.
  *
- * `listTagPages` accepts Octokit's paginator directly. The other methods return
- * each endpoint's `.data`, keeping policy independent of Octokit types.
+ * `listTagPages` and `listReleasePages` accept Octokit's paginator directly.
+ * `getRef` and `getGitObject` return each endpoint's `.data`, keeping policy
+ * independent of Octokit types.
  */
 export interface ReleasePreflightClient {
 	getRef: (ref: string) => Promise<unknown>;
@@ -72,26 +73,14 @@ function readObjectReference(value: unknown, label: string): { type: "commit" | 
 	return { type, sha: readSha(sha, label) };
 }
 
-function readAnnotatedTag(value: unknown): { type: "commit" | "tag"; sha: string } {
-	if (!isRecord(value) || !isRecord(value.object)) {
-		throw new Error("Malformed annotated tag object from GitHub");
-	}
-
-	const { type, sha } = value.object;
-	if (type !== "commit" && type !== "tag") {
-		throw new Error("Malformed annotated tag target type from GitHub");
-	}
-	return { type, sha: readSha(sha, "annotated tag target") };
-}
-
-function readTagPage(value: unknown): unknown[] {
+function readPage(value: unknown, label: string): unknown[] {
 	if (Array.isArray(value)) {
 		return value;
 	}
 	if (isRecord(value) && Array.isArray(value.data)) {
 		return value.data;
 	}
-	throw new Error("Malformed tag page from GitHub");
+	throw new Error(`Malformed ${label} page from GitHub`);
 }
 
 function readTagName(value: unknown): string {
@@ -105,16 +94,6 @@ function readTagName(value: unknown): string {
 		return value.ref.slice(TAG_REF_PREFIX.length);
 	}
 	throw new Error("Malformed tag entry from GitHub");
-}
-
-function readReleasePage(value: unknown): unknown[] {
-	if (Array.isArray(value)) {
-		return value;
-	}
-	if (isRecord(value) && Array.isArray(value.data)) {
-		return value.data;
-	}
-	throw new Error("Malformed release page from GitHub");
 }
 
 function readRelease(value: unknown): { tagName: string; release: ExistingRelease } {
@@ -134,7 +113,7 @@ function readRelease(value: unknown): { tagName: string; release: ExistingReleas
 export async function loadLiveTags(client: ReleasePreflightClient): Promise<string[]> {
 	const tags: string[] = [];
 	for await (const page of client.listTagPages()) {
-		for (const tag of readTagPage(page)) {
+		for (const tag of readPage(page, "tag")) {
 			tags.push(readTagName(tag));
 		}
 	}
@@ -160,7 +139,7 @@ async function resolveTagCommit(client: ReleasePreflightClient, exactTag: string
 		}
 		visited.add(object.sha);
 		// oxlint-disable-next-line no-await-in-loop -- The next object SHA comes from this response.
-		object = readAnnotatedTag(await client.getGitObject(object.sha));
+		object = readObjectReference(await client.getGitObject(object.sha), "annotated tag");
 	}
 	return object.sha;
 }
@@ -168,7 +147,7 @@ async function resolveTagCommit(client: ReleasePreflightClient, exactTag: string
 async function loadExistingRelease(client: ReleasePreflightClient, exactTag: string): Promise<ExistingRelease | null> {
 	let matchingRelease: ExistingRelease | null = null;
 	for await (const page of client.listReleasePages()) {
-		for (const value of readReleasePage(page)) {
+		for (const value of readPage(page, "release")) {
 			const { tagName, release } = readRelease(value);
 			if (tagName !== exactTag) {
 				continue;

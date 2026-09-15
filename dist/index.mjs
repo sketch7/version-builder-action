@@ -20027,9 +20027,6 @@ function formatPreid(template, preid, branchSlug) {
 function validatePrereleaseSuffix(suffix) {
 	if (!suffix.split(".").every((identifier) => /^[0-9A-Za-z-]+$/.test(identifier) && (!/^\d+$/.test(identifier) || /^(?:0|[1-9]\d*)$/.test(identifier)))) throw new Error(`Invalid prerelease suffix '${suffix}'`);
 }
-function coerceArray(value) {
-	return Array.isArray(value) ? value : [value];
-}
 /**
 * Parses entries in the form `"branch"` or `"branch:preid"`.
 * e.g. `["main:rc", "develop:dev", "vnext:next", "feature"]`
@@ -20165,7 +20162,7 @@ function formatStableTag(tagTmpl, version) {
 }
 /**
 * Resolves a stable `major.minor.patch` version against existing git tags.
-* `mode: "ignore"` returns the version unchanged (default, non-breaking).
+* `mode: "ignore"` skips tag conflicts after validating the numeric components (default).
 * `mode: "bump-patch"` increments the patch until a free tag is found.
 * `mode: "fail"` throws when the exact tag already exists.
 */
@@ -20173,10 +20170,7 @@ function resolveVersionConflict(input) {
 	const major = toDecimalString(input.major, "major version");
 	const minor = toDecimalString(input.minor, "minor version");
 	let patch = toDecimalString(input.patch, "patch version");
-	const patchOutput = (value) => {
-		const numericValue = Number(value);
-		return typeof input.patch === "number" && Number.isSafeInteger(numericValue) && String(numericValue) === value ? numericValue : value;
-	};
+	const patchOutput = (value) => typeof input.patch === "number" ? toCompatibleDecimal(value) : value;
 	const { tagTmpl, mode, existingTags } = input;
 	if (mode === "ignore") return {
 		baseVersion: `${major}.${minor}.${patch}`,
@@ -20209,7 +20203,7 @@ function resolveVersionConflict(input) {
 	};
 }
 
-const COMMIT_SHA$1 = /^[0-9a-f]{40,64}$/;
+const COMMIT_SHA$1 = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const TAG_REF_PREFIX = "refs/tags/";
 function isRecord(value) {
 	return typeof value === "object" && value !== null;
@@ -20230,30 +20224,16 @@ function readObjectReference(value, label) {
 		sha: readSha(sha, label)
 	};
 }
-function readAnnotatedTag(value) {
-	if (!isRecord(value) || !isRecord(value.object)) throw new Error("Malformed annotated tag object from GitHub");
-	const { type, sha } = value.object;
-	if (type !== "commit" && type !== "tag") throw new Error("Malformed annotated tag target type from GitHub");
-	return {
-		type,
-		sha: readSha(sha, "annotated tag target")
-	};
-}
-function readTagPage(value) {
+function readPage(value, label) {
 	if (Array.isArray(value)) return value;
 	if (isRecord(value) && Array.isArray(value.data)) return value.data;
-	throw new Error("Malformed tag page from GitHub");
+	throw new Error(`Malformed ${label} page from GitHub`);
 }
 function readTagName(value) {
 	if (!isRecord(value)) throw new Error("Malformed tag entry from GitHub");
 	if (typeof value.name === "string" && value.name.length > 0) return value.name;
 	if (typeof value.ref === "string" && value.ref.startsWith(TAG_REF_PREFIX) && value.ref.length > 10) return value.ref.slice(10);
 	throw new Error("Malformed tag entry from GitHub");
-}
-function readReleasePage(value) {
-	if (Array.isArray(value)) return value;
-	if (isRecord(value) && Array.isArray(value.data)) return value.data;
-	throw new Error("Malformed release page from GitHub");
 }
 function readRelease(value) {
 	if (!isRecord(value) || typeof value.tag_name !== "string" || value.tag_name.length === 0 || typeof value.draft !== "boolean" || typeof value.prerelease !== "boolean") throw new Error("Malformed release entry from GitHub");
@@ -20268,7 +20248,7 @@ function readRelease(value) {
 /** Loads the authoritative complete tag set before resolving a release version. */
 async function loadLiveTags(client) {
 	const tags = [];
-	for await (const page of client.listTagPages()) for (const tag of readTagPage(page)) tags.push(readTagName(tag));
+	for await (const page of client.listTagPages()) for (const tag of readPage(page, "tag")) tags.push(readTagName(tag));
 	return tags;
 }
 async function resolveTagCommit(client, exactTag) {
@@ -20284,13 +20264,13 @@ async function resolveTagCommit(client, exactTag) {
 	while (object.type === "tag") {
 		if (visited.has(object.sha)) throw new Error(`Annotated tag '${exactTag}' contains a cycle`);
 		visited.add(object.sha);
-		object = readAnnotatedTag(await client.getGitObject(object.sha));
+		object = readObjectReference(await client.getGitObject(object.sha), "annotated tag");
 	}
 	return object.sha;
 }
 async function loadExistingRelease(client, exactTag) {
 	let matchingRelease = null;
-	for await (const page of client.listReleasePages()) for (const value of readReleasePage(page)) {
+	for await (const page of client.listReleasePages()) for (const value of readPage(page, "release")) {
 		const { tagName, release } = readRelease(value);
 		if (tagName !== exactTag) continue;
 		if (matchingRelease !== null) throw new Error(`Ambiguous releases for '${exactTag}'`);
@@ -20420,7 +20400,7 @@ function isVersionOnlyBump(context) {
 }
 
 const BRANCH_REF_PREFIX = "refs/heads/";
-const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
+const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 function getErrorMessage(error) {
 	return error instanceof Error ? error.message : String(error ?? "Unknown error");
 }
@@ -20456,9 +20436,9 @@ function getPreflightContext(token) {
 		}
 	};
 }
-function getExistingTags(isPreRel) {
+async function getExistingTags(isPreRel, preflight) {
 	if (isPreRel) return [];
-	return listTagNames();
+	return preflight === null ? listTagNames() : loadLiveTags(preflight.client);
 }
 function getBranchSlug(preidTemplate, branch) {
 	return preidTemplate.includes("{branch}") ? sanitizeBranchName(branch) : "";
@@ -20516,13 +20496,13 @@ async function run() {
 	}
 	let baseVersion = stripPreid(version);
 	let fileVersion = baseVersion;
-	const preidBranches = parsePreidBranches(preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : [
+	const preidBranches = parsePreidBranches(preidBranchesInput ? preidBranchesInput.split(",") : [
 		"main:rc",
 		"master:rc",
 		"develop:dev",
 		"vnext:next"
 	]);
-	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
+	const stableBranches = stableBranchesInput ? stableBranchesInput.split(",") : ["^v\\d+$", "^\\d+\\.x$"];
 	let versionSuffix;
 	const versionSegments = baseVersion.split(".");
 	const [major = "", minor = "", initialPatch = ""] = versionSegments;
@@ -20540,10 +20520,9 @@ async function run() {
 	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
 	let existingTags;
 	let candidateState = null;
-	let recoverCandidate = false;
 	try {
 		if (preflight !== null && !isPreRel) validateStableBranchMajor(branch, major);
-		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
+		existingTags = await getExistingTags(isPreRel, preflight);
 		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
 			const recovery = await findReleaseAtCommit({
 				branch,
@@ -20556,7 +20535,6 @@ async function run() {
 				baseVersion = recovery.version;
 				fileVersion = recovery.version;
 				[, , patch] = recovery.version.split(".");
-				recoverCandidate = true;
 			}
 		}
 	} catch (error) {
@@ -20571,14 +20549,14 @@ async function run() {
 		validatePrereleaseSuffix(prereleaseSuffix);
 		versionSuffix = prereleaseSuffix;
 		if (versionSegments.length === 3) fileVersion = `${baseVersion}.${commitCount}`;
-	} else if (versionSegments.length === 3) try {
+	} else if (versionSegments.length === 3 && candidateState === null) try {
 		const result = resolveVersionConflict({
 			major,
 			minor,
 			patch,
 			tagTmpl,
-			mode: recoverCandidate ? "ignore" : onVersionConflict,
-			existingTags: recoverCandidate || onVersionConflict === "ignore" ? [] : existingTags
+			mode: onVersionConflict,
+			existingTags
 		});
 		const { baseVersion: bumpedVersion, bumped } = result;
 		if (bumped) {
@@ -20587,8 +20565,8 @@ async function run() {
 			fileVersion = bumpedVersion;
 			patch = String(result.patch);
 		}
-	} catch (err) {
-		setFailed(err.message);
+	} catch (error) {
+		setFailed(getErrorMessage(error));
 		return;
 	}
 	const buildVersion = versionSuffix ? `${baseVersion}-${versionSuffix}` : baseVersion;

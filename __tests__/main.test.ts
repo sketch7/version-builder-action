@@ -275,6 +275,8 @@ describe("release preflight", () => {
 	test.each([
 		["a non-branch ref", "refs/tags/v3", EXPECTED_SHA],
 		["a noncanonical commit SHA", "refs/heads/v3", "not-a-sha"],
+		["a 41-character commit SHA", "refs/heads/v3", "a".repeat(41)],
+		["a 63-character commit SHA", "refs/heads/v3", "a".repeat(63)],
 	])("enabled rejects %s before calling GitHub", async (_name, ref, sha) => {
 		mockPreflightInputs();
 		vi.mocked(github).context = {

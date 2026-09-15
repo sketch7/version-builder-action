@@ -7,7 +7,6 @@ import { readFile } from "fs/promises";
 import { findReleaseAtCommit, loadLiveTags, loadResolvedReleaseState, validateResolvedRelease } from "./release-preflight";
 import type { ReleasePreflightClient, ReleaseState, ReleaseValidation } from "./release-preflight";
 import {
-	coerceArray,
 	formatPreid,
 	formatReleaseTags,
 	getCommitCountSinceFileChange,
@@ -27,7 +26,7 @@ import type { VersionConflictMode } from "./utils";
 import { isVersionOnlyBump } from "./version-only-bump";
 
 const BRANCH_REF_PREFIX = "refs/heads/";
-const COMMIT_SHA = /^[0-9a-f]{40,64}$/;
+const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 interface PreflightContext {
 	branch: string;
@@ -69,11 +68,11 @@ function getPreflightContext(token: string): PreflightContext {
 	return { branch, expectedSha: sha, client };
 }
 
-function getExistingTags(isPreRel: boolean): string[] {
+async function getExistingTags(isPreRel: boolean, preflight: PreflightContext | null): Promise<string[]> {
 	if (isPreRel) {
 		return [];
 	}
-	return listTagNames();
+	return preflight === null ? listTagNames() : loadLiveTags(preflight.client);
 }
 
 function getBranchSlug(preidTemplate: string, branch: string): string {
@@ -156,9 +155,9 @@ export async function run(): Promise<void> {
 	let fileVersion = baseVersion;
 
 	const preidBranches = parsePreidBranches(
-		preidBranchesInput ? coerceArray(preidBranchesInput.split(",")) : ["main:rc", "master:rc", "develop:dev", "vnext:next"],
+		preidBranchesInput ? preidBranchesInput.split(",") : ["main:rc", "master:rc", "develop:dev", "vnext:next"],
 	);
-	const stableBranches = stableBranchesInput ? coerceArray(stableBranchesInput.split(",")) : ["^v\\d+$", "^\\d+\\.x$"];
+	const stableBranches = stableBranchesInput ? stableBranchesInput.split(",") : ["^v\\d+$", "^\\d+\\.x$"];
 
 	let versionSuffix: string | undefined;
 	const versionSegments = baseVersion.split(".");
@@ -171,12 +170,11 @@ export async function run(): Promise<void> {
 	const formattedPreid = getFormattedPreid(preidTemplate, resolvedPreid, branchSlug);
 	let existingTags: string[];
 	let candidateState: ReleaseState | null = null;
-	let recoverCandidate = false;
 	try {
 		if (preflight !== null && !isPreRel) {
 			validateStableBranchMajor(branch, major);
 		}
-		existingTags = preflight === null ? getExistingTags(isPreRel) : isPreRel ? [] : await loadLiveTags(preflight.client);
+		existingTags = await getExistingTags(isPreRel, preflight);
 		if (preflight !== null && !isPreRel && versionSegments.length === 3) {
 			const recovery = await findReleaseAtCommit(
 				{ branch, expectedSha: preflight.expectedSha, version: baseVersion, tagTmpl },
@@ -188,7 +186,6 @@ export async function run(): Promise<void> {
 				baseVersion = recovery.version;
 				fileVersion = recovery.version;
 				[, , patch] = recovery.version.split(".");
-				recoverCandidate = true;
 			}
 		}
 	} catch (error) {
@@ -209,15 +206,15 @@ export async function run(): Promise<void> {
 		if (versionSegments.length === 3) {
 			fileVersion = `${baseVersion}.${commitCount}`;
 		}
-	} else if (versionSegments.length === 3) {
+	} else if (versionSegments.length === 3 && candidateState === null) {
 		try {
 			const result = resolveVersionConflict({
 				major,
 				minor,
 				patch,
 				tagTmpl,
-				mode: recoverCandidate ? "ignore" : onVersionConflict,
-				existingTags: recoverCandidate || onVersionConflict === "ignore" ? [] : existingTags,
+				mode: onVersionConflict,
+				existingTags,
 			});
 			const { baseVersion: bumpedVersion, bumped } = result;
 			if (bumped) {
@@ -226,8 +223,8 @@ export async function run(): Promise<void> {
 				fileVersion = bumpedVersion;
 				patch = String(result.patch);
 			}
-		} catch (err) {
-			core.setFailed((err as Error).message);
+		} catch (error) {
+			core.setFailed(getErrorMessage(error));
 			return;
 		}
 	}

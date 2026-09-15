@@ -63,15 +63,18 @@ inputs:
     default: ""
   tag-tmpl:
     required: false
-    description: "Tag template used to parse local stable tags for latest-major selection and to
-      check version conflicts. Use `{major}` as placeholder e.g. 'v{major}' matches tag 'v1.5.6'.
-      Generated exact and floating refs use release-finalizer-compatible Git tag validation."
+    description: "Tag template for latest-major selection and version conflicts. Uses local tags
+      by default and live GitHub tags with preflight. Use `{major}` as placeholder
+      e.g. 'v{major}' matches tag 'v1.5.6'. Preflight requires exactly one marker
+      and validates the generated exact and floating Git refs."
     default: "v{major}"
   on-version-conflict:
     required: false
     description: "Behavior when a stable (non-preid) version's git tag already exists:
       'ignore' (default, no local conflict check), 'fail', or 'bump-patch'
-      (auto-increments the patch until a free tag is found)."
+      (auto-increments the patch until a free tag is found).
+      Preflight validates the final release even with 'ignore' and recovers unfinished
+      same-commit tags before applying this policy."
     default: "ignore"
   release-preflight:
     required: false
@@ -124,9 +127,9 @@ outputs:
     description: "Returns the dist-tag for the build e.g. formatted preid, 'latest', or 'v1-lts'.
       Stable-major selection uses local tags by default and live GitHub tags with release-preflight."
   exactTag:
-    description: "Validated exact Git tag for the resolved version when release-preflight is enabled."
+    description: "Validated exact Git tag for the resolved version when release-preflight is enabled and a version is emitted."
   floatingTag:
-    description: "Validated floating major Git tag when release-preflight is enabled."
+    description: "Validated floating major Git tag when release-preflight is enabled and a version is emitted."
 
 runs:
   using: "node24"

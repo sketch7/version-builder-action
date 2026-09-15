@@ -134,6 +134,22 @@ describe("loadLiveTags", () => {
 });
 
 describe("loadResolvedReleaseState", () => {
+	test.each([39, 41, 63, 65])("rejects a %i-character branch SHA from GitHub", async length => {
+		const client = createClient({
+			getRef: async () => ({ object: { type: "commit", sha: "a".repeat(length) } }),
+		});
+
+		await expect(loadResolvedReleaseState(loadInput, client)).rejects.toThrow("Malformed branch reference SHA");
+	});
+
+	test("accepts a 64-character branch SHA", async () => {
+		const sha = "a".repeat(64);
+		const client = createClient({ getRef: async () => ({ object: { type: "commit", sha } }) });
+		const state = await loadResolvedReleaseState(loadInput, client);
+
+		expect(validateResolvedRelease({ ...validationInput, expectedSha: sha }, state)).toMatchObject({ exactTag: "v1.2.3" });
+	});
+
 	test("loads a matching release from a later paginated release page", async () => {
 		const client = withReleasePages(createClient(), releasePage(releaseRecord("v9.0.0")), releasePage(releaseRecord("v1.2.3")));
 

@@ -33,8 +33,8 @@ both semver and non-semver variants as outputs.
   identifier cannot have a leading zero. For example, `rc.preview.0` and
   `01-0` are valid; `01.0` is not.
 - When stable, the version is emitted unchanged: `1.5.6`
-- A `tag` output is always emitted: pre-release builds use the formatted preid
-  label (e.g. `rc`, `demo-e2e`); stable builds emit `latest` when their major is
+- A `tag` output is emitted for every resolved version: pre-release builds use
+  the formatted preid label (e.g. `rc`, `demo-e2e`); stable builds emit `latest` when their major is
   at least every stable major parsed from local tags matching `tag-tmpl`, and
   `v{major}-lts` otherwise. Only complete stable `major.minor.patch` tags
   matching the template participate; malformed and prerelease tags are ignored.
@@ -44,8 +44,8 @@ both semver and non-semver variants as outputs.
   `fail` stops the action if the tag already exists, `bump-patch`
   auto-increments the patch until a free tag is found. Git tags are the
   source of truth — nothing is committed back to `package.json`.
-- Generated exact and floating refs are validated with the same Git ref
-  restrictions used by release finalization, including rejecting refs that
+- With preflight enabled, generated exact and floating refs are validated with
+  the same Git ref restrictions used by release finalization, including rejecting refs that
   begin with `-`. SemVer numeric components remain decimal text during
   conflict, latest-major, and dist-tag decisions, so adjacent values larger
   than `Number.MAX_SAFE_INTEGER` remain distinct.
@@ -56,26 +56,26 @@ both semver and non-semver variants as outputs.
   state and never mutates releases. Authentication, authorization, rate-limit,
   transport, and malformed-response failures stop the action without falling
   back to local tags. When disabled (the default), no token is read and
-  existing local-tag behavior is unchanged.
+  local tags still drive conflict and latest-major decisions.
 
 ## Inputs
 
-| Input                 | Required | Default                                    | Description                                                                                                                                                            |
-| --------------------- | -------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`             | No       | _(reads `package.json`)_                   | Base version to use (e.g. `1.5.6`). Any existing preid suffix is stripped automatically.                                                                               |
-| `package-json-dir`    | No       | _(repo root)_                              | Directory containing `package.json`, for monorepo sub-packages e.g. `apps/client`. Leading/trailing slashes are stripped.                                              |
-| `preid`               | No       | `dev`                                      | Default prerelease identifier used when no branch-specific mapping is defined.                                                                                         |
-| `preid-template`      | No       | `{preid}`                                  | Template for the resolved prerelease identifier. Supports `{preid}` and `{branch}`; `{branch}` is a normalized branch slug.                                            |
-| `preid-branches`      | No       | `main:rc,master:rc,develop:dev,vnext:next` | Comma-separated list of branches (with optional `branch:preid` mapping) that trigger preid versioning. Plain name uses the global `preid`.                             |
-| `stable-branches`     | No       | `^v\d+$,^\d+\.x$`                          | Comma-separated regex patterns for branches that are always stable (e.g. `v1`, `2.x`). Any branch not in `preid-branches` and not matching here falls back to `preid`. |
-| `preid-num-delimiter` | No       | `.`                                        | Delimiter between the preid and the counter (e.g. `dev.5` or `dev-5`).                                                                                                 |
-| `counter-base-ref`    | No       | _(empty)_                                  | Git ref used to count prerelease commits since its merge base with `HEAD`; when empty, counts since the last `package.json` version change.                            |
-| `force-preid`         | No       | `false`                                    | Forces preid versioning regardless of the current branch.                                                                                                              |
-| `force-stable`        | No       | `false`                                    | Forces stable versioning regardless of the current branch.                                                                                                             |
-| `tag-tmpl`            | No       | `v{major}`                                 | Template for parsing local stable tags to select `latest` or `v{major}-lts`, and for checking version conflicts. `{major}` is replaced with the major version number.  |
-| `on-version-conflict` | No       | `ignore`                                   | Behavior when a stable version's git tag already exists: `ignore` (no check, fully backward compatible), `fail`, or `bump-patch` (auto-increments the patch).          |
-| `release-preflight`   | No       | `false`                                    | Enables fail-closed live GitHub release validation. Requires `github-token`.                                                                                           |
-| `github-token`        | No       | _(empty)_                                  | Token read only for enabled preflight. The calling job needs `contents: write` so paginated release listings include drafts; the action never mutates releases.        |
+| Input                 | Required | Default                                    | Description                                                                                                                                                                                                       |
+| --------------------- | -------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`             | No       | _(reads `package.json`)_                   | Base version to use (e.g. `1.5.6`). Any existing preid suffix is stripped automatically.                                                                                                                          |
+| `package-json-dir`    | No       | _(repo root)_                              | Directory containing `package.json`, for monorepo sub-packages e.g. `apps/client`. Leading/trailing slashes are stripped.                                                                                         |
+| `preid`               | No       | `dev`                                      | Default prerelease identifier used when no branch-specific mapping is defined.                                                                                                                                    |
+| `preid-template`      | No       | `{preid}`                                  | Template for the resolved prerelease identifier. Supports `{preid}` and `{branch}`; `{branch}` is a normalized branch slug.                                                                                       |
+| `preid-branches`      | No       | `main:rc,master:rc,develop:dev,vnext:next` | Comma-separated list of branches (with optional `branch:preid` mapping) that trigger preid versioning. Plain name uses the global `preid`.                                                                        |
+| `stable-branches`     | No       | `^v\d+$,^\d+\.x$`                          | Comma-separated regex patterns for branches that are always stable (e.g. `v1`, `2.x`). Any branch not in `preid-branches` and not matching here falls back to `preid`.                                            |
+| `preid-num-delimiter` | No       | `.`                                        | Delimiter between the preid and the counter (e.g. `dev.5` or `dev-5`).                                                                                                                                            |
+| `counter-base-ref`    | No       | _(empty)_                                  | Git ref used to count prerelease commits since its merge base with `HEAD`; when empty, counts since the last `package.json` version change.                                                                       |
+| `force-preid`         | No       | `false`                                    | Forces preid versioning regardless of the current branch.                                                                                                                                                         |
+| `force-stable`        | No       | `false`                                    | Forces stable versioning regardless of the current branch.                                                                                                                                                        |
+| `tag-tmpl`            | No       | `v{major}`                                 | Template for stable-tag matching and version conflicts. Uses local tags by default and live GitHub tags with preflight. Preflight requires exactly one `{major}` marker.                                          |
+| `on-version-conflict` | No       | `ignore`                                   | Behavior when a stable version's git tag already exists: `ignore` (no allocation conflict check), `fail`, or `bump-patch` (auto-increments the patch). Preflight still validates the final release with `ignore`. |
+| `release-preflight`   | No       | `false`                                    | Enables live GitHub release validation and version-only bump detection. Requires `github-token` and full checkout history.                                                                                        |
+| `github-token`        | No       | _(empty)_                                  | Token read only for enabled preflight. The calling job needs `contents: write` so paginated release listings include drafts; the action never mutates releases.                                                   |
 
 ## Outputs
 
@@ -90,6 +90,7 @@ marker. Code/dependency changes, missing history, manual runs and explicit
 
 | Output         | Example       | Description                                                                                                                                                                                                        |
 | -------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `skip-publish` | `false`       | Whether preflight detected a version-only next-minor push. When `true`, all other outputs are absent.                                                                                                              |
 | `version`      | `1.5.6-dev.5` | Full semver with preid, or plain version when stable. Patch is bumped when `on-version-conflict: bump-patch` resolved a tag collision.                                                                             |
 | `baseVersion`  | `1.5.6`       | Base version without any pre-release suffix (from the `version` input or `package.json`).                                                                                                                          |
 | `fileVersion`  | `1.5.6.5`     | 4-part numeric version for non-semver consumers (e.g. .NET assembly version); plain version when stable.                                                                                                           |
@@ -102,8 +103,8 @@ marker. Code/dependency changes, missing history, manual runs and explicit
 | `isPrerelease` | `true`        | Whether the generated version is a prerelease.                                                                                                                                                                     |
 | `isLatest`     | `false`       | Whether a stable version belongs to the highest major parsed from matching stable tags; default mode uses local tags, while `release-preflight` uses live GitHub tags. Always `false` for prereleases.             |
 | `tag`          | `latest`      | Dist-tag for the build: formatted preid label when pre-release (e.g. `rc`), otherwise `latest` or `v{major}-lts`; stable-major selection uses local tags by default and live GitHub tags with `release-preflight`. |
-| `exactTag`     | `v1.5.6`      | Exact Git tag derived from the final validated version; set only when `release-preflight` is enabled.                                                                                                              |
-| `floatingTag`  | `v1`          | Floating major Git tag derived from the final validated version; set only when `release-preflight` is enabled.                                                                                                     |
+| `exactTag`     | `v1.5.6`      | Exact Git tag derived from the final validated version; set only when `release-preflight` is enabled and a version is emitted.                                                                                     |
+| `floatingTag`  | `v1`          | Floating major Git tag derived from the final validated version; set only when `release-preflight` is enabled and a version is emitted.                                                                            |
 
 ## Branch Behavior (defaults)
 
@@ -231,7 +232,9 @@ Git can calculate the merge base.
 Protects against merging two release branches before a version bump lands —
 otherwise both would resolve to the same stable version and the second
 publish would fail partway through the build. Opt-in; the default
-(`ignore`) never checks tags, so this is fully backward compatible.
+(`ignore`) does not check for conflicts. Stable tags are still read for
+latest-major selection. Enabling `release-preflight` adds release validation
+regardless of this conflict policy.
 
 ```yaml
 - name: Build version
@@ -262,22 +265,26 @@ steps:
     id: version
     uses: sketch7/version-builder-action@v3
     with:
-      version: "1.5.6"
+      # Read package.json so version-only next-minor pushes can be skipped.
       force-stable: "true"
       on-version-conflict: "bump-patch"
       release-preflight: "true"
       github-token: ${{ github.token }}
 
   - name: Apply the resolved package version
+    if: steps.version.outputs.skip-publish != 'true'
     run: npm version "${{ steps.version.outputs.version }}" --allow-same-version=true --git-tag-version=false
 
   - name: Build
+    if: steps.version.outputs.skip-publish != 'true'
     run: npm run build
 
   - name: Pack
+    if: steps.version.outputs.skip-publish != 'true'
     run: npm pack
 
   - name: Publish the resolved package
+    if: steps.version.outputs.skip-publish != 'true'
     run: npm publish --tag "${{ steps.version.outputs.tag }}"
 ```
 
@@ -285,14 +292,35 @@ An existing exact tag is accepted only when it matches the triggering commit
 and has no GitHub Release yet. Stable retries reuse that allocated version,
 including an automatically bumped hotfix, instead of allocating another patch.
 A completed release fails before publication, even for the same commit.
-A mismatched tag, draft release, or wrong release kind also fails.
-This is a breaking change: callers must finalize the version returned by
-preflight and must not rerun publication for a completed release.
+A final exact tag pointing to another commit, a draft release, or the wrong
+release kind also fails. The `bump-patch` policy can allocate a free stable
+patch when earlier tags belong to other commits.
+These requirements apply only when `release-preflight` is enabled: finalize the
+returned version, skip publication when `skip-publish` is `true`, and do not
+rerun publication for a completed release.
 Preflight cannot remove races introduced by later mutations: immediately before
 creating/moving Git tags or marking a release latest, revalidate the branch
 head and relevant release/tag state. Do not recalculate the version during that
 finalization. The action never creates, updates, or deletes Git tags or GitHub
 Releases.
+
+### Upgrading from v3.4 to v3.5
+
+- Existing callers using canonical `major.minor.patch` versions keep the same
+  defaults. Preflight remains disabled and does not read a token or call GitHub.
+- Stable numeric components are now validated as canonical decimal strings,
+  even without preflight. Previously accepted inputs such as `01.2.3` or
+  `1.2.3+build` now fail in stable mode; use `1.2.3` instead. This is a narrow
+  compatibility change included in the minor release.
+- Workflows opting into preflight need `contents: write`, full checkout
+  history, and the `skip-publish` guards shown above. Preflight accepts branch
+  refs only; stable releases on `vN` must have major `N`.
+- Preflight requires canonical SemVer without build metadata and exactly one
+  `{major}` marker in `tag-tmpl`. It emits validated `exactTag` and
+  `floatingTag` outputs only when a version is returned.
+- Finalization must consume the returned version and recheck live state before
+  mutation. A completed release fails preflight even for the same commit; an
+  unfinished same-commit tag can be reused.
 
 ### Sub-package in a monorepo
 
