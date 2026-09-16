@@ -1,3 +1,7 @@
+import { execFileSync } from "child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -22,6 +26,43 @@ import {
 } from "../src/utils";
 
 const DEFAULT_STABLE_BRANCHES = ["^v\\d+$", "^\\d+\\.x$"];
+
+function withTemporaryGitRepository(callback: (repositoryPath: string) => void): void {
+	const repositoryPath = mkdtempSync(join(tmpdir(), "version-builder-action-"));
+	const git = (...args: string[]): string => execFileSync("git", args, { cwd: repositoryPath, encoding: "utf8" });
+
+	try {
+		git("init", "--initial-branch", "main");
+		git("config", "core.autocrlf", "false");
+		git("config", "user.email", "test@example.com");
+		git("config", "user.name", "Test User");
+		callback(repositoryPath);
+	} finally {
+		rmSync(repositoryPath, { force: true, recursive: true });
+	}
+}
+
+function commitFile(repositoryPath: string, input: { filePath: string; contents: string; message: string }): void {
+	writeFileSync(join(repositoryPath, input.filePath), input.contents);
+	execFileSync("git", ["add", input.filePath], { cwd: repositoryPath });
+	execFileSync("git", ["commit", "-m", input.message], { cwd: repositoryPath });
+}
+
+function executeGitCommand(repositoryPath: string, command: string): string {
+	const [executable, ...args] = command.match(/(?:[^\s']+|'[^']*')+/g) ?? [];
+	if (executable !== "git") {
+		throw new Error(`Expected a git command, received '${command}'`);
+	}
+	return execFileSync(
+		executable,
+		args.map(arg => arg.replace(/^'|'$/g, "")),
+		{ cwd: repositoryPath, encoding: "utf8" },
+	);
+}
+
+function countCommitsSinceVersionChange(repositoryPath: string): number {
+	return getCommitCountSinceFileChange("package.json", command => executeGitCommand(repositoryPath, command), '"version":');
+}
 
 describe("parseCanonicalVersion", () => {
 	test.each([
@@ -431,6 +472,41 @@ describe("stripPreid", () => {
 });
 
 describe("getCommitCountSinceFileChange", () => {
+	test("counts the first mainline change after a version bump pull request merge", () => {
+		withTemporaryGitRepository(repositoryPath => {
+			const git = (...args: string[]): string => execFileSync("git", args, { cwd: repositoryPath, encoding: "utf8" });
+			commitFile(repositoryPath, { filePath: "package.json", contents: '{"version":"3.0.0"}\n', message: "initial version" });
+			git("switch", "--create", "version-bump");
+			commitFile(repositoryPath, { filePath: "package.json", contents: '{"version":"4.0.0"}\n', message: "bump version" });
+			git("switch", "main");
+			git("merge", "--no-ff", "version-bump", "--message", "merge version bump pull request");
+			commitFile(repositoryPath, { filePath: "feature.txt", contents: "first release change\n", message: "add first release change" });
+
+			expect(countCommitsSinceVersionChange(repositoryPath)).toBe(1);
+		});
+	});
+
+	test.each(["direct", "squash"] as const)("uses the %s mainline version bump as counter boundary", mergeMode => {
+		withTemporaryGitRepository(repositoryPath => {
+			const git = (...args: string[]): string => execFileSync("git", args, { cwd: repositoryPath, encoding: "utf8" });
+			commitFile(repositoryPath, { filePath: "package.json", contents: '{"version":"3.0.0"}\n', message: "initial version" });
+
+			if (mergeMode === "direct") {
+				commitFile(repositoryPath, { filePath: "package.json", contents: '{"version":"4.0.0"}\n', message: "bump version" });
+			} else {
+				git("switch", "--create", "version-bump");
+				commitFile(repositoryPath, { filePath: "package.json", contents: '{"version":"4.0.0"}\n', message: "bump version" });
+				git("switch", "main");
+				git("merge", "--squash", "version-bump");
+				git("commit", "--message", "squash version bump pull request");
+			}
+
+			expect(countCommitsSinceVersionChange(repositoryPath)).toBe(0);
+			commitFile(repositoryPath, { filePath: "feature.txt", contents: "first release change\n", message: "add first release change" });
+			expect(countCommitsSinceVersionChange(repositoryPath)).toBe(1);
+		});
+	});
+
 	test("returns commit count since file last changed", () => {
 		let call = 0;
 		const execFn = (): string => (call++ === 0 ? "abc123def\n" : "5\n");
@@ -463,7 +539,9 @@ describe("getCommitCountSinceFileChange", () => {
 			return call++ === 0 ? "abc123def\n" : "3\n";
 		};
 		expect(getCommitCountSinceFileChange("package.json", execFn, '"version":')).toBe(3);
+		expect(commands[0]).toContain("--first-parent");
 		expect(commands[0]).toContain("-G '\"version\":'");
+		expect(commands[1]).toBe("git rev-list --count --first-parent abc123def..HEAD");
 		expect(commands[0]).not.toContain("-G 'undefined'");
 	});
 
