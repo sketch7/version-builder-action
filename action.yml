@@ -59,7 +59,8 @@ inputs:
   counter-base-ref:
     required: false
     description: "Optional git ref used to count prerelease commits since its merge base with
-      HEAD. When empty, counts commits since the last package.json version change."
+      HEAD. When empty, counts first-parent history from the latest package.json version
+      change; the bump boundary is counter 0 and the first subsequent mainline change is 1."
     default: ""
   tag-tmpl:
     required: false

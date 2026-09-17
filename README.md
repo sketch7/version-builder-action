@@ -25,9 +25,11 @@ both semver and non-semver variants as outputs.
   lowercase, hyphen-separated slug. A branch slug is only required when the
   template uses `{branch}`.
 - When pre-release, the counter is appended: `1.5.6` → `1.5.6-dev.5`. By
-  default it counts commits since the last `package.json` version change, so it
-  resets to `0` on every version bump. Set `counter-base-ref` to count commits
-  since that ref's merge base with `HEAD` instead.
+  default it follows first-parent (mainline) history from the last
+  `package.json` version change. The version bump boundary is counter `0`
+  (intentionally unpublished); the first subsequent mainline release is `1`.
+  Set `counter-base-ref` to count commits since that ref's merge base with
+  `HEAD` instead.
 - The assembled prerelease suffix must be valid SemVer: dot-separated
   identifiers may contain letters, digits, and hyphens, while a numeric-only
   identifier cannot have a leading zero. For example, `rc.preview.0` and
@@ -69,7 +71,7 @@ both semver and non-semver variants as outputs.
 | `preid-branches`      | No       | `main:rc,master:rc,develop:dev,vnext:next` | Comma-separated list of branches (with optional `branch:preid` mapping) that trigger preid versioning. Plain name uses the global `preid`.                                                                        |
 | `stable-branches`     | No       | `^v\d+$,^\d+\.x$`                          | Comma-separated regex patterns for branches that are always stable (e.g. `v1`, `2.x`). Any branch not in `preid-branches` and not matching here falls back to `preid`.                                            |
 | `preid-num-delimiter` | No       | `.`                                        | Delimiter between the preid and the counter (e.g. `dev.5` or `dev-5`).                                                                                                                                            |
-| `counter-base-ref`    | No       | _(empty)_                                  | Git ref used to count prerelease commits since its merge base with `HEAD`; when empty, counts since the last `package.json` version change.                                                                       |
+| `counter-base-ref`    | No       | _(empty)_                                  | Git ref used to count prerelease commits since its merge base with `HEAD`; when empty, follows first-parent history from the latest `package.json` version change.                                                |
 | `force-preid`         | No       | `false`                                    | Forces preid versioning regardless of the current branch.                                                                                                                                                         |
 | `force-stable`        | No       | `false`                                    | Forces stable versioning regardless of the current branch.                                                                                                                                                        |
 | `tag-tmpl`            | No       | `v{major}`                                 | Template for stable-tag matching and version conflicts. Uses local tags by default and live GitHub tags with preflight. Preflight requires exactly one `{major}` marker.                                          |
@@ -130,7 +132,7 @@ steps:
 
   - name: Build version
     id: version
-    uses: sketch7/version-builder-action@v3
+    uses: sketch7/version-builder-action@v4
     with:
       version: "1.5.6" # optional — omit to read from package.json
       preid: "dev" # optional, default fallback preid
@@ -153,7 +155,7 @@ steps:
 
 ```yaml
 - name: Build version (stable)
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     force-stable: "true"
 ```
@@ -166,10 +168,10 @@ to `rc`, and the default template leaves it unqualified.
 ```yaml
 - name: Build main release candidate
   id: version
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     version: "1.3.0"
-    # On main, this yields 1.3.0-rc.5 when the counter is 5.
+    # The version bump is rc.0; the first subsequent mainline release is rc.1.
 ```
 
 ### Stable v1 and v2 releases
@@ -182,7 +184,7 @@ tag (for example, `v1-lts` when matching v2 tags exist).
 ```yaml
 - name: Build stable v1 or v2 release
   id: version
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     version: "2.3.0"
     # refs/heads/v2 → 2.3.0, tag latest when no matching local tag has a higher major.
@@ -198,7 +200,7 @@ Git can calculate the merge base.
 ```yaml
 - name: Build feature preview
   id: version
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     version: "1.3.0"
     preid: "demo"
@@ -212,7 +214,7 @@ Git can calculate the merge base.
 
 ```yaml
 - name: Build version (always preid)
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     force-preid: "true"
     preid: "rc"
@@ -222,7 +224,7 @@ Git can calculate the merge base.
 
 ```yaml
 - name: Build version
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     stable-branches: "^v\\d+$,^\\d+\\.x$,^hotfix/.*$"
 ```
@@ -238,7 +240,7 @@ regardless of this conflict policy.
 
 ```yaml
 - name: Build version
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     on-version-conflict: "bump-patch" # or "fail" to stop instead of bumping
 ```
@@ -263,7 +265,7 @@ steps:
 
   - name: Resolve and preflight package release
     id: version
-    uses: sketch7/version-builder-action@v3
+    uses: sketch7/version-builder-action@v4
     with:
       # Read package.json so version-only next-minor pushes can be skipped.
       force-stable: "true"
@@ -304,14 +306,21 @@ head and relevant release/tag state. Do not recalculate the version during that
 finalization. The action never creates, updates, or deletes Git tags or GitHub
 Releases.
 
-### Upgrading from v3.4 to v3.5
+### Upgrading to v4
+
+- Default prerelease counters now follow first-parent (mainline) history.
+  A version-bump boundary is `rc.0`, which is intentionally unpublished; the
+  first subsequent mainline release is `rc.1`.
+- Do not migrate a prerelease series already in progress: the changed counter
+  allocation can collide with versions already published. Migrate at a new base
+  version instead.
 
 - Existing callers using canonical `major.minor.patch` versions keep the same
   defaults. Preflight remains disabled and does not read a token or call GitHub.
 - Stable numeric components are now validated as canonical decimal strings,
   even without preflight. Previously accepted inputs such as `01.2.3` or
   `1.2.3+build` now fail in stable mode; use `1.2.3` instead. This is a narrow
-  compatibility change included in the minor release.
+  compatibility change carried forward from v3.5.
 - Workflows opting into preflight need `contents: write`, full checkout
   history, and the `skip-publish` guards shown above. Preflight accepts branch
   refs only; stable releases on `vN` must have major `N`.
@@ -326,7 +335,7 @@ Releases.
 
 ```yaml
 - name: Build version
-  uses: sketch7/version-builder-action@v3
+  uses: sketch7/version-builder-action@v4
   with:
     package-json-dir: "apps/client"
 ```
